@@ -1,0 +1,13 @@
+.env
+__pycache__
+*
+!*/
+
+!.gitignore
+
+!**/*.py
+!**/*.ipynb
+!**/*.txt
+
+*output/
+*wandb/
