@@ -49,22 +49,31 @@ class MosaicSDFVisualizer:
                 lights=self.lights
             )
         )
-        self.load_template_obj(template_mesh_path, device=device)
+        
+        self.load_meshes_to_show(template_mesh_path)
 
     
-    def load_template_obj(self, template_mesh_path, device):
-        # self.template_vertices, self.template_faces, self.template_aux = load_obj(template_mesh_path)
-        # self.template_mesh = load_objs_as_meshes([template_mesh_path], device=device)
-        template_vertices, template_faces, template_aux = load_obj(template_mesh_path, device=device)
-        
-        total_verts = template_vertices.shape[0]
-        verts_rgb = torch.ones((1, total_verts, 3), device=template_vertices.device)  # White color for all vertices
-        verts_rgb *= torch.tensor([.6,0,0], device=self.device)
+    def load_meshes_to_show(self, template_mesh_path):
+        template_vertices, template_faces, template_aux = load_obj(template_mesh_path,  device=self.device)
+
+        self.template_mesh = self.create_mesh_from_verts(template_vertices, 
+                                                    template_faces, vert_colors = [.6, 0, 0])
+
+        self.shape_target_mesh = self.create_mesh_from_verts(self.shape_sampler.vertices, 
+                                                  self.shape_sampler.faces, 
+                                                  vert_colors = [0, .6, 0])
+    
+
+    def create_mesh_from_verts(self, vertices, faces, vert_colors = [.6, 0, 0]):
+        total_verts = vertices.shape[0]
+        verts_rgb = torch.ones((1, total_verts, 3), device=self.device)  # White color for all vertices
+        verts_rgb *= torch.tensor(vert_colors, device=self.device)
         # Initialize the textures with the corrected verts_rgb
         textures = Textures(verts_rgb=verts_rgb)
 
         # Create the mesh
-        self.template_mesh = Meshes(verts=[template_vertices], faces=[template_faces.verts_idx], textures=textures)
+        return Meshes(verts=[vertices.to(self.device)], faces=[faces.verts_idx.to(self.device)], 
+                      textures=textures).to(self.device)
 
 
     def create_mosaic_grid_meshes(self):
@@ -80,7 +89,8 @@ class MosaicSDFVisualizer:
         #     shininess=10.0
         # )        
 
-        all_meshes = []
+        all_meshes = [self.shape_target_mesh]
+
         for center, scale in zip(volume_centers, scales):
 
             scaled_verts = self.template_mesh.verts_list()[0] * scale

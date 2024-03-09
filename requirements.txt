@@ -1,2 +1,6 @@
 einops
 ray[tune]
+scikit-learn
+trimesh
+pysdf
+# mesh-to-sdf

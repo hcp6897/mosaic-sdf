@@ -8,6 +8,7 @@ __pycache__
 !**/*.py
 !**/*.ipynb
 !**/*.txt
+!data/cube_wireframe.obj
 
 *output/
 *wandb/
