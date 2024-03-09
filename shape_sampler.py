@@ -11,32 +11,78 @@ from pytorch3d.io import load_obj
 
 
 class ShapeSampler(nn.Module):
-    def __init__(self, vertices, faces):       
+    def __init__(self, vertices, faces, normalize_shape=True):       
         super(ShapeSampler, self).__init__()
-
+            
         self.vertices = vertices
         self.faces = faces
 
-        tv = tracked_array(vertices.numpy())
-        tf = tracked_array(faces.verts_idx.numpy())
+        if normalize_shape:
+            self.vertices = ShapeSampler.normalize_shape(self.vertices)
+
+        tv = tracked_array(vertices.cpu().numpy())
+        tf = tracked_array(faces.verts_idx.cpu().numpy())
 
         self.sdf_fun = SDF(tv, tf)
 
         self.noise_scale = 0#noise_scale
 
 
+    def forward(self, points):   
+        # add check if points are not tensor, then bypassing numpy() conversion
+        np_points = points.detach().cpu().numpy()
+        return torch.tensor(self.sdf_fun(np_points)).to(points.device)
+
+
+    def compute_sdf_gradient(self, points, delta=1e-4):
+        """
+        Approximate the gradient of the SDF at given points using central differences.
+        
+        Args:
+        - points: Tensor of shape (N, 3) representing N points in 3D space.
+        - delta: A small offset used for finite differences.
+        
+        Returns:
+        - grad: Tensor of shape (N, 3) representing the approximate gradient of the SDF at each point.
+        """
+        device = points.device
+        N, D = points.shape
+        grad = torch.zeros_like(points)
+        
+        for i in range(D):
+            # Create a basis vector for the i-th dimension
+            offset = torch.zeros(D, device=device)
+            offset[i] = delta
+            
+            # Compute SDF at slightly offset points
+            sdf_plus = self.forward(points + offset)
+            sdf_minus = self.forward(points - offset)
+            
+            # Approximate the derivative using central differences
+            grad[:, i] = (sdf_plus - sdf_minus) / (2 * delta)
+        
+        return grad
+    
+    
     @abstractmethod
     def from_file(file_path, device='cpu'):
         vertices, faces, aux = load_obj(file_path, device=device)
         return ShapeSampler(vertices, faces)
     
+    
+    @abstractmethod
+    def normalize_shape(vertices):
+        # Calculate the scale factor as the max extent in any dimension
+        max_extent = torch.abs(vertices).max()
+        # Normalize vertices to fit within the [-1, 1] range
+        normalized_vertices = vertices / max_extent
         
-    def forward(self, points):   
-        # add check if points are not tensor, then bypassing numpy() conversion
-        np_points = points.detach().cpu().numpy()
-        return torch.tensor(self.sdf_fun(np_points)).to(points.device)
-    
-    
+        # Further adjust to ensure the shape is centered at the origin
+        center_offset = normalized_vertices.mean(dim=0)
+        normalized_vertices -= center_offset
+
+        return normalized_vertices
+
 
     ### FPS below
 

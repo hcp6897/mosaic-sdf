@@ -9,7 +9,8 @@ from pytorch3d.renderer import (
     MeshRasterizer,
     SoftPhongShader,
     BlendParams,
-    Materials
+    Materials,
+    AmbientLights
 )
 from pytorch3d.io import load_objs_as_meshes
 from pytorch3d.utils import ico_sphere
@@ -27,10 +28,20 @@ class MosaicSDFVisualizer:
         self.shape_sampler = shape_sampler
         self.device = device #torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         
-        R, T = look_at_view_transform(2.7, 0, 180)
+        R, T = look_at_view_transform(5, 45, 30)
         self.cameras = FoVPerspectiveCameras(device=self.device, R=R, T=T)
         
-        self.lights = PointLights(device=self.device, location=[[0.0, 0.0, -3.0]])
+        # self.lights = PointLights(device=self.device, location=[
+        #     [0.0, 0.0, -3.0],
+        #     # [0.0, 0.0, 3.0],
+        #     # [-3.0, 0.0, 0],
+        #     # [3.0, 0.0, 0],
+        #     ])
+        self.lights = AmbientLights(device=self.device, 
+                                    ambient_color=((1.0, 1.0, 1.0),),
+                                    # ambient_intensity=(0.5,)
+                                    )
+
         
         self.raster_settings = RasterizationSettings(
             image_size=512, 
@@ -57,11 +68,11 @@ class MosaicSDFVisualizer:
         template_vertices, template_faces, template_aux = load_obj(template_mesh_path,  device=self.device)
 
         self.template_mesh = self.create_mesh_from_verts(template_vertices, 
-                                                    template_faces, vert_colors = [.6, 0, 0])
+                                                    template_faces, vert_colors = [.8, 0, 0])
 
         self.shape_target_mesh = self.create_mesh_from_verts(self.shape_sampler.vertices, 
                                                   self.shape_sampler.faces, 
-                                                  vert_colors = [0, .6, 0])
+                                                  vert_colors = [0, .3, 0])
     
 
     def create_mesh_from_verts(self, vertices, faces, vert_colors = [.6, 0, 0]):

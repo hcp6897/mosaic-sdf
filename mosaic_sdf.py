@@ -121,14 +121,14 @@ class MosaicSDF(nn.Module):
         
         interpolation_values = self.mosaic_sdf_values[None, ...] * interpolation_weights
         interpolation_values = interpolation_values.sum(axis=(2,3,4))
-
         # Calculate each grid weight
         grid_scaled_relative_dist = torch.linalg.norm(grid_scaled_relative_positions, axis=-1)
-
+        
         # w_i_hat
         grid_weight = torch.relu(1 - grid_scaled_relative_dist)
         grid_weight = grid_weight / grid_weight.sum(axis=-1, keepdim=True)
-
+        grid_weight = torch.nan_to_num(grid_weight, nan=0.0)
+        
         point_sdf = torch.sum(interpolation_values * grid_weight, axis=-1)
 
         return point_sdf
