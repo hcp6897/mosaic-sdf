@@ -7,7 +7,7 @@ from einops import rearrange
 from shape_sampler import ShapeSampler
 
 class MosaicSDF(nn.Module):
-    def __init__(self, shape_sampler: ShapeSampler, grid_resolution=7, n_grids=1024):
+    def __init__(self, grid_resolution=7, n_grids=1024):
         """
         Initialize the MosaicSDF representation.
         
@@ -17,7 +17,7 @@ class MosaicSDF(nn.Module):
         """
         super(MosaicSDF, self).__init__()
         
-        self.shape_sampler = shape_sampler
+        # self.shape_sampler = shape_sampler
 
         self.n_grids = n_grids
         # Assuming volume_centers, scales, and sdf_values are learnable parameters
@@ -33,7 +33,10 @@ class MosaicSDF(nn.Module):
         init_mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution)
         self.register_buffer('mosaic_sdf_values', init_mosaic_sdf_values)
 
-        
+
+    def update_sdf_values(self, shape_sampler: ShapeSampler):
+        self.mosaic_sdf_values = self._compute_local_sdf(shape_sampler)
+
 
     def forward(self, points):
         """
@@ -42,14 +45,14 @@ class MosaicSDF(nn.Module):
         :param points: Tensor of points where SDF values are to be computed (N, 3).
         :return: SDF values at the provided points.
         """
-        self.mosaic_sdf_values = self._compute_local_sdf()
+        
 
         points_sdf = self._compute_point_sdf(points)
         
         return points_sdf
 
     
-    def _compute_local_sdf(self):
+    def _compute_local_sdf(self, shape_sampler: ShapeSampler):
                 
         in_grid_offsets = torch.linspace(-.5, .5, self.k)
 
@@ -62,7 +65,7 @@ class MosaicSDF(nn.Module):
         grid_points = self.volume_centers[:, None, :] + scaled_grid_offsets
 
         batched_grid_points = rearrange(grid_points, 'n k3 d -> (n k3) d', d=3) 
-        sdf_values = self.shape_sampler(batched_grid_points)#[:, None] 
+        sdf_values = shape_sampler(batched_grid_points)#[:, None] 
         sdf_values = rearrange(sdf_values, '(n k1 k2 k3) -> n k1 k2 k3', n=self.n_grids, k1=self.k, k2=self.k, k3=self.k)
         # sdf_values = rearrange(sdf_values, '(n k1 k2 k3) d-> n k1 k2 k3 d', n=self.n_grids, k1=self.k, k2=self.k, k3=self.k, d=1)
 
