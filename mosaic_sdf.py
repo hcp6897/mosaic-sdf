@@ -18,6 +18,7 @@ class MosaicSDF(nn.Module):
         super(MosaicSDF, self).__init__()
         
         # self.shape_sampler = shape_sampler
+        self.out_of_reach_const = 1
 
         self.n_grids = n_grids
         # Assuming volume_centers, scales, and sdf_values are learnable parameters
@@ -25,10 +26,11 @@ class MosaicSDF(nn.Module):
         
         self.k = grid_resolution
 
-        min_rand_scale, max_rand_scale = .01, 1.
+        min_rand_scale, max_rand_scale = 1, 1 #.05, .3
 
         self.scales = nn.Parameter(torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale)
-
+        # self.scales = torch.rand((n_grids,), requires_grad=False, device='cuda') * (max_rand_scale - min_rand_scale) + min_rand_scale
+        
         init_mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution)
         self.register_buffer('mosaic_sdf_values', init_mosaic_sdf_values)
 
@@ -103,10 +105,15 @@ class MosaicSDF(nn.Module):
         grid_weight = torch.relu(1 - grid_scaled_relative_dist)
         
         sum_of_weights = grid_weight.sum(axis=-1, keepdim=True)
-        # kernel crashes if I not detach normalized_grid_weight, maybe because of bug in autograd
-        normalized_grid_weight = (grid_weight / sum_of_weights).detach()
         
-        point_sdf = torch.sum(interpolation_values * normalized_grid_weight, axis=-1)
+        # TODO kernel crashes if I not detach normalized_grid_weight, maybe because of bug in autograd
+        normalized_grid_weight = torch.nan_to_num(
+            (grid_weight / sum_of_weights).detach()
+            , nan=0.0)
+        
+        point_sdf = torch.nan_to_num(
+            torch.sum(interpolation_values * normalized_grid_weight, axis=-1),
+            nan=self.out_of_reach_const)
         
         return point_sdf
     

@@ -18,7 +18,8 @@ class MosaicSDFOptimizer:
         
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
-            lr=config.get('lr', config.get('lr', 1e-3))
+            lr=config.get('lr', 1e-3),
+            weight_decay=config.get('weight_decay', 0),
         )
 
         self.lambda_val = config['lambda_val']
@@ -40,42 +41,35 @@ class MosaicSDFOptimizer:
         # L1 Loss - discrepancy in SDF values
         l1_loss = torch.norm(fx_xj - fs_xj, p=1) / len(points_x)
         
-        if False:
-            # synthetic_output = torch.sum(self.model.volume_centers ** 2)
-            synthetic_output = self.model.volume_centers * points_y
+        if True:
+            ## L2 losses 
+            fx_xj_l2 = self.model.forward(points_y)
+            ## Compute gradients (first derivatives) for the points
+            fx_yj_grad = torch.autograd.grad(outputs=fx_xj_l2, 
+                                                inputs=points_y, 
+                                            grad_outputs=torch.ones_like(fx_xj_l2), 
+                                            create_graph=True)[0]
+            
+            grad_delta = 1e-2
 
-            # Target gradient: aiming for gradients to approach 0
-            target_grad = torch.zeros_like(self.model.volume_centers)
+            # fx_yj_grad_num = self.compute_gradient_numerically(points_y, self.model.forward, delta=grad_delta)
+            # fx_yj_grad = fx_yj_grad_num
+            # an_num_grad_loss = torch.mean(torch.abs(fx_yj_grad_num - fx_yj_grad))
+            
+            # print(fx_yj_grad[:3])
+            # fs_yj_grad = self.shape_sampler.compute_sdf_gradient(points_y, delta=1e-4)
+            fs_yj_grad = self.compute_gradient_numerically(points_y, self.shape_sampler.forward, delta=grad_delta)
+            # print(fs_yj_grad[:3])
 
-            # Compute gradients of the synthetic function's output w.r.t. volume_centers
-            volume_centers_grad = torch.autograd.grad(outputs=synthetic_output, 
-                                                    #   inputs=self.model.volume_centers,
-                                                      inputs=points_y,
-                                                    grad_outputs=torch.ones_like(synthetic_output),
-                                                    create_graph=True)[0]
+            # L2 Loss - discrepancy in gradients
+            l2_loss = torch.norm(fx_yj_grad - fs_yj_grad, p=2) / len(points_y)
+        else:
+            l2_loss = torch.tensor([0]).to(self.device)
 
-            # L2 Loss on the difference between computed gradients and target gradients
-            l2_loss = torch.norm(volume_centers_grad - target_grad, p=2)
-            loss = l2_loss
-        
-
-        # L2 losses 
-        fx_xj_l2 = self.model.forward(points_y)
-        # Compute gradients (first derivatives) for the points
-        fx_yj_grad = torch.autograd.grad(outputs=fx_xj_l2, 
-                                            inputs=points_y, 
-                                        grad_outputs=torch.ones_like(fx_xj_l2), 
-                                        create_graph=True)[0]
-        
-        fs_yj_grad = self.shape_sampler.compute_sdf_gradient(points_y, delta=1e-4)
-        
-        # L2 Loss - discrepancy in gradients
-        l2_loss = torch.norm(fx_yj_grad - fs_yj_grad, p=2) / len(points_y)
-        
         # Combined Loss
         loss = l1_loss + self.lambda_val * l2_loss
         
-        return loss
+        return loss, l1_loss, l2_loss #, an_num_grad_loss
 
 
     def train(self):
@@ -85,14 +79,17 @@ class MosaicSDFOptimizer:
     
         for iteration in range(self.num_iterations):
 
-            points_x = torch.rand((self.points_sample_size, d), 
-                                  device=self.device, requires_grad=False) * 2 - 1
-            points_y = torch.rand((self.points_sample_size, d), 
-                                  device=self.device, requires_grad=True) * 2 - 1
+            points_x = (torch.rand((self.points_sample_size, d), 
+                                  device=self.device, requires_grad=False) - 1) * 2
+            points_y = (torch.rand((self.points_sample_size, d), 
+                                  device=self.device, requires_grad=True) - 1) * 2
             
 
             self.optimizer.zero_grad()
-            loss = self.compute_loss(points_x, points_y)
+            loss, l1_loss, l2_loss = self.compute_loss(points_x, points_y)
+            
+            # loss = l1_loss  
+
             loss.backward()
 
             if iteration == 0 and self.config['output_graph']:
@@ -101,9 +98,18 @@ class MosaicSDFOptimizer:
                 graph.render(f'out/computation_graph_{iteration}', format='png')  # Saves the graph as 'computation_graph.png'
 
             self.optimizer.step()
-
+            stats = {
+                'step': iteration,
+                'loss': loss.item(),
+                'l1_loss': l1_loss.item(),
+                'l2_loss': l2_loss.item(),
+                # 'an_num_loss': an_num_grad_loss.item()
+            }
             if iteration % self.config.get('print_loss_iterations', 1) == 0:
-                print(f"Iteration {iteration}, Loss: {loss.item():.4f}")
+                print(f"Iteration {stats['step']}, Loss: {stats['loss']:.4f}, "
+                      f"L1: {stats['l1_loss']:.4f}, L2: {stats['l2_loss']:.4f} "
+                    #   f"An2Num Loss: {stats['an_num_loss']:.4f}"
+                      )
             
             total_loss += loss.item()
             # print(f"loss: {total_loss}")
@@ -122,3 +128,35 @@ class MosaicSDFOptimizer:
 
     def load_checkpoint(self, checkpoint_path):
         self.model.load_state_dict(torch.load(checkpoint_path))
+
+
+
+    def compute_gradient_numerically(self, points, forward_func, delta=1e-4):
+        """
+        Approximate the gradient of the SDF at given points using central differences.
+        
+        Args:
+        - points: Tensor of shape (N, 3) representing N points in 3D space.
+        - delta: A small offset used for finite differences.
+        
+        Returns:
+        - grad: Tensor of shape (N, 3) representing the approximate gradient of the SDF at each point.
+        """
+        device = points.device
+        N, D = points.shape
+        # grad = torch.zeros_like(points, requires_grad=False, device=device)
+        grad = torch.zeros_like(points, device=device)
+        
+        for i in range(D):
+            # Create a basis vector for the i-th dimension
+            offset = torch.zeros(D, device=device)
+            offset[i] = delta
+            
+            # Compute SDF at slightly offset points
+            sdf_plus = forward_func(points + offset)
+            sdf_minus = forward_func(points - offset)
+            
+            # Approximate the derivative using central differences
+            grad[:, i] = (sdf_plus - sdf_minus) / (2 * delta)
+        
+        return grad

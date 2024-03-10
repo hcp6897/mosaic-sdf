@@ -72,6 +72,9 @@ class MosaicSDFVisualizer:
         self.template_mesh = self.create_mesh_from_verts(template_vertices, 
                                                     template_faces, vert_colors = [.8, 0, 0])
 
+        self.boundary_mesh = self.create_mesh_from_verts(template_vertices, 
+                                                    template_faces, vert_colors = [0, 0, .5])
+
         self.shape_target_mesh = self.create_mesh_from_verts(self.shape_sampler.vertices, 
                                                   self.shape_sampler.faces, 
                                                   vert_colors = [0, .3, 0])
@@ -104,16 +107,23 @@ class MosaicSDFVisualizer:
 
         all_meshes = [self.shape_target_mesh]
 
-        for center, scale in zip(volume_centers, scales):
 
+        def scale_offset_mesh(mesh, offset, scale):
             scaled_verts = self.template_mesh.verts_list()[0] * scale
             # Translate the mesh
-            translated_verts = scaled_verts + center
+            translated_verts = scaled_verts + offset
             # Create a new mesh with the transformed vertices and the same faces
-            new_mesh = self.template_mesh.clone()
+            new_mesh = mesh.clone()
             new_mesh = new_mesh.update_padded(new_verts_padded=translated_verts.unsqueeze(0))
-            
+            return new_mesh
+
+
+        for center, scale in zip(volume_centers, scales):
+            new_mesh = scale_offset_mesh(self.template_mesh, center, scale)
             all_meshes.append(new_mesh)
+        
+        new_mesh = scale_offset_mesh(self.boundary_mesh, 0, 2)
+        all_meshes.append(new_mesh)
             
         combined_mesh = join_meshes_as_scene(all_meshes)
 
