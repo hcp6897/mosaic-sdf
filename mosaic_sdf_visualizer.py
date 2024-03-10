@@ -21,6 +21,8 @@ from mosaic_sdf import MosaicSDF
 from shape_sampler import ShapeSampler
 
 from pytorch3d.io import load_obj
+import matplotlib.pyplot as plt
+
 
 class MosaicSDFVisualizer:
     def __init__(self, mosaic_sdf: MosaicSDF, shape_sampler: ShapeSampler, device, template_mesh_path:str):
@@ -131,20 +133,22 @@ class MosaicSDFVisualizer:
         return images
 
 
-    def visualize_shape(self):
-        # Fetch the shape mesh from ShapeSampler
-        mesh = self.shape_sampler.get_mesh()
+    # def visualize_shape(self):
+    #     # Fetch the shape mesh from ShapeSampler
+    #     mesh = self.shape_sampler.get_mesh()
         
-        # Render the shape mesh
-        rendered_shape = self.renderer(mesh)
+    #     # Render the shape mesh
+    #     rendered_shape = self.renderer(mesh)
         
-        return rendered_shape
+    #     return rendered_shape
 
-    def visualize(self):
-        # Combine visualization of grids and shape
-        self.visualize_grids()
-        shape_image = self.visualize_shape()
-        
-        # Placeholder for displaying the rendered image; integrate with your image display tool/framework
-        # For example, if using IPython display: display(Image(tensor_to_image(shape_image)))
-        pass
+    def draw_all(self):
+                
+        with torch.no_grad():
+            meshes = self.create_mosaic_grid_meshes()
+            vis = self.render_meshes(meshes)
+            # vis.shape
+            plt.figure(figsize=(4, 4))
+            plt.imshow(vis[0, ..., :3].cpu().numpy())
+            plt.axis("off")
+

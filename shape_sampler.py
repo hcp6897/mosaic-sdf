@@ -10,6 +10,7 @@ from pysdf import SDF
 from pytorch3d.io import load_obj
 
 
+# TODO test point_mesh_distance from PT3D
 class ShapeSampler(nn.Module):
     def __init__(self, vertices, faces, normalize_shape=True):       
         super(ShapeSampler, self).__init__()
@@ -47,7 +48,7 @@ class ShapeSampler(nn.Module):
         """
         device = points.device
         N, D = points.shape
-        grad = torch.zeros_like(points)
+        grad = torch.zeros_like(points, requires_grad=False, device=device)
         
         for i in range(D):
             # Create a basis vector for the i-th dimension

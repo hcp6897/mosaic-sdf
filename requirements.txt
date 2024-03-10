@@ -4,3 +4,8 @@ scikit-learn
 trimesh
 pysdf
 # mesh-to-sdf
+torchviz
+
+# 
+# sudo apt-get install graphviz
+# 

@@ -29,14 +29,8 @@ class MosaicSDF(nn.Module):
 
         self.scales = nn.Parameter(torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale)
 
-        # self.mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution)
         init_mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution)
         self.register_buffer('mosaic_sdf_values', init_mosaic_sdf_values)
-
-
-    def update_sdf_values(self, shape_sampler: ShapeSampler):
-        self.mosaic_sdf_values = self._compute_local_sdf(shape_sampler)
-
 
     def forward(self, points):
         """
@@ -45,31 +39,10 @@ class MosaicSDF(nn.Module):
         :param points: Tensor of points where SDF values are to be computed (N, 3).
         :return: SDF values at the provided points.
         """
-        
 
         points_sdf = self._compute_point_sdf(points)
         
         return points_sdf
-
-    
-    def _compute_local_sdf(self, shape_sampler: ShapeSampler):
-                
-        in_grid_offsets = torch.linspace(-.5, .5, self.k)
-
-        x, y, z = torch.meshgrid(in_grid_offsets, in_grid_offsets, in_grid_offsets, indexing='ij')
-
-        grid_offsets = torch.stack([x, y, z], dim=-1).reshape((-1, 3)).to(self.scales.device)
-
-        scaled_grid_offsets = self.scales[:, None, None] * grid_offsets[None, ...]
-
-        grid_points = self.volume_centers[:, None, :] + scaled_grid_offsets
-
-        batched_grid_points = rearrange(grid_points, 'n k3 d -> (n k3) d', d=3) 
-        sdf_values = shape_sampler(batched_grid_points)#[:, None] 
-        sdf_values = rearrange(sdf_values, '(n k1 k2 k3) -> n k1 k2 k3', n=self.n_grids, k1=self.k, k2=self.k, k3=self.k)
-        # sdf_values = rearrange(sdf_values, '(n k1 k2 k3) d-> n k1 k2 k3 d', n=self.n_grids, k1=self.k, k2=self.k, k3=self.k, d=1)
-
-        return sdf_values
 
 
     def _compute_trilinear_interpolation_weights(self, relative_positions):
@@ -98,19 +71,20 @@ class MosaicSDF(nn.Module):
         # weights = distances * distances_mask
 
         # Step 6: Normalize weights
-        in_grid_weights_sum = in_grid_weights.sum(dim=(2,3,4)) 
+        in_grid_weights_sum = in_grid_weights.sum(dim=(2,3,4))#.detach()
         in_grid_weights_normalized = in_grid_weights / in_grid_weights_sum[:, :, None, None, None]
 
         # set zeros where have nan because divided by zero
         # in_grid_weights_normalized[in_grid_weights_normalized != in_grid_weights_normalized] = 0
         in_grid_weights_normalized = torch.nan_to_num(in_grid_weights_normalized, nan=0.0)
-
+        
         return in_grid_weights_normalized
 
 
     def _compute_point_sdf(self, points):
         
         points_expanded_to_grids = points[:, None, :]
+        points_expanded_to_grids = points_expanded_to_grids#.detach()
         grids_expanded_to_points = self.volume_centers[None, ...]
         scales_expanded_to_points = self.scales[None, ..., None]
 
@@ -121,14 +95,47 @@ class MosaicSDF(nn.Module):
         
         interpolation_values = self.mosaic_sdf_values[None, ...] * interpolation_weights
         interpolation_values = interpolation_values.sum(axis=(2,3,4))
+        
         # Calculate each grid weight
         grid_scaled_relative_dist = torch.linalg.norm(grid_scaled_relative_positions, axis=-1)
         
         # w_i_hat
         grid_weight = torch.relu(1 - grid_scaled_relative_dist)
-        grid_weight = grid_weight / grid_weight.sum(axis=-1, keepdim=True)
-        grid_weight = torch.nan_to_num(grid_weight, nan=0.0)
         
-        point_sdf = torch.sum(interpolation_values * grid_weight, axis=-1)
-
+        sum_of_weights = grid_weight.sum(axis=-1, keepdim=True)
+        # kernel crashes if I not detach normalized_grid_weight, maybe because of bug in autograd
+        normalized_grid_weight = (grid_weight / sum_of_weights).detach()
+        
+        point_sdf = torch.sum(interpolation_values * normalized_grid_weight, axis=-1)
+        
         return point_sdf
+    
+
+    # Update SDF values
+    def update_sdf_values(self, shape_sampler: ShapeSampler):
+        self.mosaic_sdf_values = self._compute_local_sdf(shape_sampler)
+
+    
+    def _compute_local_sdf(self, shape_sampler: ShapeSampler):
+                
+        in_grid_offsets = torch.linspace(-.5, .5, self.k)
+
+        x, y, z = torch.meshgrid(in_grid_offsets, in_grid_offsets, in_grid_offsets, indexing='ij')
+
+        grid_offsets = (
+            torch.stack([x, y, z], dim=-1)
+                .reshape((-1, 3))
+                .to(self.scales.device)
+        )
+        
+        scaled_grid_offsets = self.scales[:, None, None] * grid_offsets[None, ...]
+
+        grid_points = self.volume_centers[:, None, :] + scaled_grid_offsets
+
+        batched_grid_points = rearrange(grid_points, 'n k3 d -> (n k3) d', d=3) 
+
+        sdf_values = shape_sampler(batched_grid_points)
+
+        sdf_values = rearrange(sdf_values, '(n k1 k2 k3) -> n k1 k2 k3', n=self.n_grids, k1=self.k, k2=self.k, k3=self.k)
+        
+        return sdf_values
