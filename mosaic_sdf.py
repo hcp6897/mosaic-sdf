@@ -26,7 +26,7 @@ class MosaicSDF(nn.Module):
         
         self.k = grid_resolution
 
-        min_rand_scale, max_rand_scale = 1, 1 #.05, .3
+        min_rand_scale, max_rand_scale = .05, .9
 
         self.scales = nn.Parameter(torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale)
         # self.scales = torch.rand((n_grids,), requires_grad=False, device='cuda') * (max_rand_scale - min_rand_scale) + min_rand_scale

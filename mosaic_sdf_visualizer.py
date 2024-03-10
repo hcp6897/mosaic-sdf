@@ -22,7 +22,7 @@ from shape_sampler import ShapeSampler
 
 from pytorch3d.io import load_obj
 import matplotlib.pyplot as plt
-
+from skimage.measure import marching_cubes
 
 class MosaicSDFVisualizer:
     def __init__(self, mosaic_sdf: MosaicSDF, shape_sampler: ShapeSampler, device, template_mesh_path:str):
@@ -143,16 +143,7 @@ class MosaicSDFVisualizer:
         return images
 
 
-    # def visualize_shape(self):
-    #     # Fetch the shape mesh from ShapeSampler
-    #     mesh = self.shape_sampler.get_mesh()
-        
-    #     # Render the shape mesh
-    #     rendered_shape = self.renderer(mesh)
-        
-    #     return rendered_shape
-
-    def draw_all(self):
+    def plot_meshes(self):
                 
         with torch.no_grad():
             meshes = self.create_mosaic_grid_meshes()
@@ -162,3 +153,36 @@ class MosaicSDFVisualizer:
             plt.imshow(vis[0, ..., :3].cpu().numpy())
             plt.axis("off")
 
+
+
+    def rasterize_mosaic_sdf(self, resolution=8, device = 'cpu'):
+        
+        # # Assuming 'mosaic_sdf' is your MosaicSDF instance and 'resolution' is the desired grid resolution
+        grid_points = torch.stack(torch.meshgrid(
+            torch.linspace(-1, 1, resolution),
+            torch.linspace(-1, 1, resolution),
+            torch.linspace(-1, 1, resolution)
+        ), dim=-1).reshape(-1, 3)#.to(device)
+
+        sdf_values = self.mosaic_sdf(grid_points.to(self.device))
+        sdf_values = torch.clamp(sdf_values, -1, 1)
+        sdf_volume = sdf_values.reshape(resolution, resolution, resolution).to(device).numpy()
+
+        # Run marching cubes to get vertices, faces, and normals
+        verts, faces, normals, values = marching_cubes(sdf_volume, level=0)
+        # faces = faces + 1  # skimage has 0-indexed faces, while PyTorch3D expects 1-indexed
+
+        # Convert to PyTorch tensors
+        verts = torch.tensor(verts.copy(), dtype=torch.float32)
+        faces = torch.tensor(faces.copy(), dtype=torch.int64)
+
+        total_verts = verts.shape[0]
+        verts_rgb = torch.ones((1, total_verts, 3), device=device)
+        verts_rgb *= torch.tensor([.75, 0, 0], device=device)
+        # verts_rgb *= torch.tensor(verts, device=device)
+        # Initialize the textures with the corrected verts_rgb
+        textures = Textures(verts_rgb=verts_rgb)
+
+        # Create a PyTorch3D mesh
+        mesh = Meshes(verts=[verts], faces=[faces], textures=textures)
+        return mesh

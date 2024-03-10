@@ -32,7 +32,7 @@ class ShapeSampler(nn.Module):
     def forward(self, points):   
         # add check if points are not tensor, then bypassing numpy() conversion
         np_points = points.detach().cpu().numpy()
-        return torch.tensor(self.sdf_fun(np_points)).to(points.device)
+        return torch.tensor(self.sdf_fun(np_points) * -1).to(points.device) 
 
 
     # def compute_sdf_gradient(self, points, delta=1e-4):
