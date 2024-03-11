@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import torch
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
@@ -23,6 +24,8 @@ from shape_sampler import ShapeSampler
 from pytorch3d.io import load_obj
 import matplotlib.pyplot as plt
 from skimage.measure import marching_cubes
+import numpy as np
+from utils import to_numpy, to_tensor
 
 class MosaicSDFVisualizer:
     def __init__(self, mosaic_sdf: MosaicSDF, shape_sampler: ShapeSampler, device, template_mesh_path:str):
@@ -68,31 +71,43 @@ class MosaicSDFVisualizer:
     
     def load_meshes_to_show(self, template_mesh_path):
         template_vertices, template_faces, template_aux = load_obj(template_mesh_path,  device=self.device)
+        
+        template_vertices, _, _ = ShapeSampler.normalize_vertices(template_vertices)
+        
 
-        self.template_mesh = self.create_mesh_from_verts(template_vertices, 
-                                                    template_faces, vert_colors = [.8, 0, 0])
+        self.template_mesh = MosaicSDFVisualizer.create_mesh_from_verts(template_vertices, 
+                                                    template_faces, vert_colors = [.8, 0, 0],
+                                                  device=self.device)
 
-        self.boundary_mesh = self.create_mesh_from_verts(template_vertices, 
-                                                    template_faces, vert_colors = [0, 0, .5])
+        self.boundary_mesh = MosaicSDFVisualizer.create_mesh_from_verts(template_vertices, 
+                                                    template_faces, vert_colors = [0, 0, .5],
+                                                  device=self.device)
 
-        self.shape_target_mesh = self.create_mesh_from_verts(self.shape_sampler.vertices, 
+        self.shape_target_mesh = MosaicSDFVisualizer.create_mesh_from_verts(self.shape_sampler.vertices, 
                                                   self.shape_sampler.faces, 
-                                                  vert_colors = [0, .3, 0])
+                                                  vert_colors = [0, .3, 0],
+                                                  device=self.device)
     
 
-    def create_mesh_from_verts(self, vertices, faces, vert_colors = [.6, 0, 0]):
+    @abstractmethod
+    def create_mesh_from_verts(vertices, faces, vert_colors = [.6, 0, 0], device='cpu'):
         total_verts = vertices.shape[0]
-        verts_rgb = torch.ones((1, total_verts, 3), device=self.device)  # White color for all vertices
-        verts_rgb *= torch.tensor(vert_colors, device=self.device)
+        verts_rgb = torch.ones((1, total_verts, 3), device=device)  # White color for all vertices
+        verts_rgb *= torch.tensor(vert_colors, device=device)
         # Initialize the textures with the corrected verts_rgb
         textures = Textures(verts_rgb=verts_rgb)
 
         # Create the mesh
-        return Meshes(verts=[vertices.to(self.device)], faces=[faces.verts_idx.to(self.device)], 
-                      textures=textures).to(self.device)
+        return Meshes(verts=[vertices.to(device)], 
+                      faces=[faces.verts_idx.to(device)], 
+                      textures=textures).to(device)
 
 
-    def create_mosaic_grid_meshes(self):
+    def create_state_meshes(self, show_mosaic_grids=True, 
+                            show_target_mesh=True,
+                            show_boundary_mesh=True,
+                            show_rasterized_sdf_mesh=True
+                            ):
         """
         Visualizes the MosaicSDF grids as semi-transparent cubes.
         """
@@ -105,25 +120,22 @@ class MosaicSDFVisualizer:
         #     shininess=10.0
         # )        
 
-        all_meshes = [self.shape_target_mesh]
+        all_meshes = []
+        if show_target_mesh:
+            all_meshes.append(self.shape_target_mesh)
 
 
-        def scale_offset_mesh(mesh, offset, scale):
-            scaled_verts = self.template_mesh.verts_list()[0] * scale
-            # Translate the mesh
-            translated_verts = scaled_verts + offset
-            # Create a new mesh with the transformed vertices and the same faces
-            new_mesh = mesh.clone()
-            new_mesh = new_mesh.update_padded(new_verts_padded=translated_verts.unsqueeze(0))
-            return new_mesh
+        if show_rasterized_sdf_mesh:
+            all_meshes.append(MosaicSDFVisualizer.rasterize_sdf(self.mosaic_sdf, device=self.device))
 
 
-        for center, scale in zip(volume_centers, scales):
-            new_mesh = scale_offset_mesh(self.template_mesh, center, scale)
-            all_meshes.append(new_mesh)
+        if show_mosaic_grids:
+            for center, scale in zip(volume_centers, scales):
+                new_mesh = ShapeSampler.scale_offset_mesh(self.template_mesh, center, scale)
+                all_meshes.append(new_mesh)
         
-        new_mesh = scale_offset_mesh(self.boundary_mesh, 0, 2)
-        all_meshes.append(new_mesh)
+        if show_boundary_mesh:
+            all_meshes.append(self.boundary_mesh)
             
         combined_mesh = join_meshes_as_scene(all_meshes)
 
@@ -146,7 +158,7 @@ class MosaicSDFVisualizer:
     def plot_meshes(self):
                 
         with torch.no_grad():
-            meshes = self.create_mosaic_grid_meshes()
+            meshes = self.create_state_meshes()
             vis = self.render_meshes(meshes)
             # vis.shape
             plt.figure(figsize=(4, 4))
@@ -155,7 +167,10 @@ class MosaicSDFVisualizer:
 
 
 
-    def rasterize_mosaic_sdf(self, resolution=8, device = 'cpu'):
+    def rasterize_sdf(sdf_func, resolution=16, device = 'cpu', 
+                      vert_colors=[.25, .25, .25],
+                      sdf_scaler=1,
+                      extra_sdf_offset=[0,0,0]):
         
         # # Assuming 'mosaic_sdf' is your MosaicSDF instance and 'resolution' is the desired grid resolution
         grid_points = torch.stack(torch.meshgrid(
@@ -163,26 +178,41 @@ class MosaicSDFVisualizer:
             torch.linspace(-1, 1, resolution),
             torch.linspace(-1, 1, resolution)
         ), dim=-1).reshape(-1, 3)#.to(device)
+        
+        # if sdf_func is None:
+        #     sdf_func = self.mosaic_sdf
 
-        sdf_values = self.mosaic_sdf(grid_points.to(self.device))
-        sdf_values = torch.clamp(sdf_values, -1, 1)
-        sdf_volume = sdf_values.reshape(resolution, resolution, resolution).to(device).numpy()
+        sdf_values = sdf_func(grid_points.to(device))
+        sdf_values *= sdf_scaler
 
+        sdf_volume = to_numpy(sdf_values.reshape(resolution, resolution, resolution))
+        
         # Run marching cubes to get vertices, faces, and normals
-        verts, faces, normals, values = marching_cubes(sdf_volume, level=0)
+        sdf_verts, sdf_faces, normals, values = marching_cubes(sdf_volume, level=0)
+        
+        sdf_offset = np.ones(3) * resolution / 2
+        sdf_max_span = np.ones(3) * resolution / 2
+
+        sdf_verts, _, _ = ShapeSampler.normalize_vertices(sdf_verts, sdf_offset, sdf_max_span)
+        sdf_verts += np.array(extra_sdf_offset)
+
         # faces = faces + 1  # skimage has 0-indexed faces, while PyTorch3D expects 1-indexed
-
+        # print(verts)
         # Convert to PyTorch tensors
-        verts = torch.tensor(verts.copy(), dtype=torch.float32)
-        faces = torch.tensor(faces.copy(), dtype=torch.int64)
+        sdf_verts = torch.tensor(sdf_verts, dtype=torch.float32)
+        # sdf_verts = torch.tensor(sdf_verts.copy(), dtype=torch.float32)
 
-        total_verts = verts.shape[0]
+        # verts = ShapeSampler.normalize_shape(verts)
+        sdf_faces = torch.tensor(sdf_faces.copy(), dtype=torch.int64)
+
+        total_verts = sdf_verts.shape[0]
         verts_rgb = torch.ones((1, total_verts, 3), device=device)
-        verts_rgb *= torch.tensor([.75, 0, 0], device=device)
+        verts_rgb *= torch.tensor(vert_colors, device=device)
         # verts_rgb *= torch.tensor(verts, device=device)
         # Initialize the textures with the corrected verts_rgb
         textures = Textures(verts_rgb=verts_rgb)
 
         # Create a PyTorch3D mesh
-        mesh = Meshes(verts=[verts], faces=[faces], textures=textures)
+        mesh = Meshes(verts=[sdf_verts], faces=[sdf_faces], textures=textures).to(device)
+        
         return mesh

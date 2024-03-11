@@ -19,7 +19,7 @@ class ShapeSampler(nn.Module):
         self.faces = faces
 
         if normalize_shape:
-            self.vertices = ShapeSampler.normalize_shape(self.vertices)
+            self.vertices, self.norm_center_offset, self.norm_max_extent = ShapeSampler.normalize_vertices(self.vertices)
 
         tv = tracked_array(vertices.cpu().numpy())
         tf = tracked_array(faces.verts_idx.cpu().numpy())
@@ -34,36 +34,6 @@ class ShapeSampler(nn.Module):
         np_points = points.detach().cpu().numpy()
         return torch.tensor(self.sdf_fun(np_points) * -1).to(points.device) 
 
-
-    # def compute_sdf_gradient(self, points, delta=1e-4):
-    #     """
-    #     Approximate the gradient of the SDF at given points using central differences.
-        
-    #     Args:
-    #     - points: Tensor of shape (N, 3) representing N points in 3D space.
-    #     - delta: A small offset used for finite differences.
-        
-    #     Returns:
-    #     - grad: Tensor of shape (N, 3) representing the approximate gradient of the SDF at each point.
-    #     """
-    #     device = points.device
-    #     N, D = points.shape
-    #     grad = torch.zeros_like(points, requires_grad=False, device=device)
-        
-    #     for i in range(D):
-    #         # Create a basis vector for the i-th dimension
-    #         offset = torch.zeros(D, device=device)
-    #         offset[i] = delta
-            
-    #         # Compute SDF at slightly offset points
-    #         sdf_plus = self.forward(points + offset)
-    #         sdf_minus = self.forward(points - offset)
-            
-    #         # Approximate the derivative using central differences
-    #         grad[:, i] = (sdf_plus - sdf_minus) / (2 * delta)
-        
-    #     return grad
-    
     
     @abstractmethod
     def from_file(file_path, device='cpu'):
@@ -72,17 +42,30 @@ class ShapeSampler(nn.Module):
     
     
     @abstractmethod
-    def normalize_shape(vertices):
+    def scale_offset_mesh(mesh, offset, scale):
+        scaled_verts = mesh.verts_list()[0] * scale
+        # Translate the mesh
+        translated_verts = scaled_verts + offset
+        # Create a new mesh with the transformed vertices and the same faces
+        new_mesh = mesh.clone()
+        new_mesh = new_mesh.update_padded(new_verts_padded=translated_verts.unsqueeze(0))
+        return new_mesh
+
+
+    @abstractmethod
+    def normalize_vertices(vertices, center_offset=None, max_extent=None):
         # Further adjust to ensure the shape is centered at the origin
-        center_offset = vertices.mean(dim=0)
+        if center_offset is None:
+            center_offset = vertices.mean(dim=0)
         vertices -= center_offset
 
         # Calculate the scale factor as the max extent in any dimension
-        max_extent = torch.abs(vertices).max()
+        if max_extent is None:
+            max_extent = torch.abs(vertices).max()
         # Normalize vertices to fit within the [-1, 1] range
         normalized_vertices = vertices / max_extent
         
-        return normalized_vertices
+        return normalized_vertices, center_offset, max_extent
 
 
     ### FPS below
@@ -130,3 +113,35 @@ class ShapeSampler(nn.Module):
     #     else:
     #         raise ValueError("Unknown shape type.")
     #     return points
+
+
+
+
+    # def compute_sdf_gradient(self, points, delta=1e-4):
+    #     """
+    #     Approximate the gradient of the SDF at given points using central differences.
+        
+    #     Args:
+    #     - points: Tensor of shape (N, 3) representing N points in 3D space.
+    #     - delta: A small offset used for finite differences.
+        
+    #     Returns:
+    #     - grad: Tensor of shape (N, 3) representing the approximate gradient of the SDF at each point.
+    #     """
+    #     device = points.device
+    #     N, D = points.shape
+    #     grad = torch.zeros_like(points, requires_grad=False, device=device)
+        
+    #     for i in range(D):
+    #         # Create a basis vector for the i-th dimension
+    #         offset = torch.zeros(D, device=device)
+    #         offset[i] = delta
+            
+    #         # Compute SDF at slightly offset points
+    #         sdf_plus = self.forward(points + offset)
+    #         sdf_minus = self.forward(points - offset)
+            
+    #         # Approximate the derivative using central differences
+    #         grad[:, i] = (sdf_plus - sdf_minus) / (2 * delta)
+        
+    #     return grad
