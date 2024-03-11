@@ -6,6 +6,8 @@ pysdf
 # mesh-to-sdf
 torchviz
 
+pytest
+
 # 
 # sudo apt-get install graphviz
 # 

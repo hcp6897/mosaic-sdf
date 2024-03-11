@@ -7,7 +7,7 @@ from einops import rearrange
 from shape_sampler import ShapeSampler
 
 class MosaicSDF(nn.Module):
-    def __init__(self, grid_resolution=7, n_grids=1024):
+    def __init__(self, grid_resolution=7, n_grids=1024, volume_centers=None, volume_scales=None):
         """
         Initialize the MosaicSDF representation.
         
@@ -21,15 +21,19 @@ class MosaicSDF(nn.Module):
         self.out_of_reach_const = 1
 
         self.n_grids = n_grids
-        # Assuming volume_centers, scales, and sdf_values are learnable parameters
-        self.volume_centers = nn.Parameter(torch.rand((self.n_grids, 3)) * 2 - 1)  # Initialize randomly within [-1, 1]
-        
         self.k = grid_resolution
 
-        min_rand_scale, max_rand_scale = .05, .9
+        
+        if volume_centers is None:
+            volume_centers = torch.rand((self.n_grids, 3)) * 2 - 1
+        # Assuming volume_centers, scales, and sdf_values are learnable parameters
+        self.volume_centers = nn.Parameter(volume_centers)  
+        
 
-        self.scales = nn.Parameter(torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale)
-        # self.scales = torch.rand((n_grids,), requires_grad=False, device='cuda') * (max_rand_scale - min_rand_scale) + min_rand_scale
+        if volume_scales is None:
+            min_rand_scale, max_rand_scale = .5, .9
+            volume_scales = torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale
+        self.scales = nn.Parameter(volume_scales)
         
         init_mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution)
         self.register_buffer('mosaic_sdf_values', init_mosaic_sdf_values)
@@ -50,7 +54,7 @@ class MosaicSDF(nn.Module):
     def _compute_trilinear_interpolation_weights(self, relative_positions):
         
         # Step 1: Create a tensor with each cell's value being its relative position within the tensor
-        rel_positions = torch.linspace(0, 1, steps=self.k, device=relative_positions.device)
+        rel_positions = torch.linspace(-1, 1, steps=self.k, device=relative_positions.device)
         grid_coords = torch.stack(
             torch.meshgrid(rel_positions, rel_positions, rel_positions, indexing='ij'), 
             dim=-1)
@@ -64,10 +68,15 @@ class MosaicSDF(nn.Module):
         in_grid_rel_offsets = rel_pos_expanded - grid_coords_expanded  # Shape: (b, n, K, K, K, 3)
 
         # Step 4: Compute distances from offsets
-        in_grid_distances = torch.linalg.norm(in_grid_rel_offsets, dim=-1)  # Shape: (b, n, K, K, K)
-
+        # in_grid_distances = torch.linalg.norm(in_grid_rel_offsets, dim=-1, ord=1)  # Shape: (b, n, K, K, K)
+        in_grid_distances, _ = in_grid_rel_offsets.abs().max(dim=-1)
+        # print(f'in_grid_distances: {in_grid_distances}')
+        
         # Step 5: Zero-out distances greater than 1, 
-        in_grid_weights = torch.where(in_grid_distances <= 1, in_grid_distances, torch.zeros_like(in_grid_distances))
+        in_grid_weights = torch.where(in_grid_distances <= 1.0, 
+                                      1 - in_grid_distances, 
+                                      torch.zeros_like(in_grid_distances))
+        # print(f'in_grid_weights: {in_grid_weights}')
         # might replace above with use of clamp / saturate, pseudo:
         # distances_mask = 1 - torch.floor(torch.clamp(distances, 0, 1))
         # weights = distances * distances_mask
@@ -79,6 +88,7 @@ class MosaicSDF(nn.Module):
         # set zeros where have nan because divided by zero
         # in_grid_weights_normalized[in_grid_weights_normalized != in_grid_weights_normalized] = 0
         in_grid_weights_normalized = torch.nan_to_num(in_grid_weights_normalized, nan=0.0)
+        # print(f'in_grid_weights_normalized: {in_grid_weights_normalized}')
         
         return in_grid_weights_normalized
 
@@ -90,19 +100,22 @@ class MosaicSDF(nn.Module):
         grids_expanded_to_points = self.volume_centers[None, ...]
         scales_expanded_to_points = self.scales[None, ..., None]
 
-        grid_relative_positions = points_expanded_to_grids - grids_expanded_to_points
-        grid_scaled_relative_positions = grid_relative_positions / scales_expanded_to_points
+        grid_relative_pos_to_point = (points_expanded_to_grids - grids_expanded_to_points) / scales_expanded_to_points
 
-        interpolation_weights = self._compute_trilinear_interpolation_weights(grid_scaled_relative_positions)
+        interpolation_weights = self._compute_trilinear_interpolation_weights(grid_relative_pos_to_point)
+        # print(f'grid_normalized_relative_positions: {grid_relative_pos_to_point}')
         
         interpolation_values = self.mosaic_sdf_values[None, ...] * interpolation_weights
         interpolation_values = interpolation_values.sum(axis=(2,3,4))
-        
         # Calculate each grid weight
-        grid_scaled_relative_dist = torch.linalg.norm(grid_scaled_relative_positions, axis=-1)
+        
+        grid_normalized_relative_dist, _ = grid_relative_pos_to_point.abs().max(dim=-1)
+        # print(f'grid_normalized_relative_dist: {grid_normalized_relative_dist}')
+        
+        # grid_normalized_relative_dist = torch.linalg.norm(grid_normalized_relative_positions, axis=-1)
         
         # w_i_hat
-        grid_weight = torch.relu(1 - grid_scaled_relative_dist)
+        grid_weight = torch.relu(1 - grid_normalized_relative_dist)
         
         sum_of_weights = grid_weight.sum(axis=-1, keepdim=True)
         
@@ -125,7 +138,7 @@ class MosaicSDF(nn.Module):
     
     def _compute_local_sdf(self, shape_sampler: ShapeSampler):
                 
-        in_grid_offsets = torch.linspace(-.5, .5, self.k)
+        in_grid_offsets = torch.linspace(-1, 1, self.k)
 
         x, y, z = torch.meshgrid(in_grid_offsets, in_grid_offsets, in_grid_offsets, indexing='ij')
 

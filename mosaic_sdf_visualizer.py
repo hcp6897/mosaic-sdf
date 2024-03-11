@@ -18,14 +18,14 @@ from pytorch3d.utils import ico_sphere
 from pytorch3d.renderer.mesh.textures import Textures
 from pytorch3d.structures.meshes import join_meshes_as_scene
 
-from mosaic_sdf import MosaicSDF
-from shape_sampler import ShapeSampler
-
 from pytorch3d.io import load_obj
 import matplotlib.pyplot as plt
 from skimage.measure import marching_cubes
 import numpy as np
 from utils import to_numpy, to_tensor
+
+from mosaic_sdf import MosaicSDF
+from shape_sampler import ShapeSampler
 
 class MosaicSDFVisualizer:
     def __init__(self, mosaic_sdf: MosaicSDF, shape_sampler: ShapeSampler, device, template_mesh_path:str):
@@ -166,7 +166,7 @@ class MosaicSDFVisualizer:
             plt.axis("off")
 
 
-
+    @abstractmethod
     def rasterize_sdf(sdf_func, resolution=16, device = 'cpu', 
                       vert_colors=[.25, .25, .25],
                       sdf_scaler=1,
@@ -176,7 +176,7 @@ class MosaicSDFVisualizer:
         grid_points = torch.stack(torch.meshgrid(
             torch.linspace(-1, 1, resolution),
             torch.linspace(-1, 1, resolution),
-            torch.linspace(-1, 1, resolution)
+            torch.linspace(-1, 1, resolution), indexing='ij'
         ), dim=-1).reshape(-1, 3)#.to(device)
         
         # if sdf_func is None:
