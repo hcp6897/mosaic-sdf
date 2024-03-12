@@ -106,7 +106,8 @@ class MosaicSDFVisualizer:
     def create_state_meshes(self, show_mosaic_grids=True, 
                             show_target_mesh=True,
                             show_boundary_mesh=True,
-                            show_rasterized_sdf_mesh=True
+                            show_rasterized_sdf_mesh=True,
+                            **kwargs
                             ):
         """
         Visualizes the MosaicSDF grids as semi-transparent cubes.
@@ -126,7 +127,7 @@ class MosaicSDFVisualizer:
 
 
         if show_rasterized_sdf_mesh:
-            all_meshes.append(MosaicSDFVisualizer.rasterize_sdf(self.mosaic_sdf, device=self.device))
+            all_meshes.append(MosaicSDFVisualizer.rasterize_sdf(self.mosaic_sdf, device=self.device, **kwargs))
 
 
         if show_mosaic_grids:
@@ -167,9 +168,9 @@ class MosaicSDFVisualizer:
 
 
     @abstractmethod
-    def rasterize_sdf(sdf_func, resolution=16, device = 'cpu', 
+    def rasterize_sdf(sdf_func, resolution=8, device = 'cpu', 
                       vert_colors=[.25, .25, .25],
-                      sdf_scaler=1,
+                      sdf_scaler=-1,
                       extra_sdf_offset=[0,0,0]):
         
         # # Assuming 'mosaic_sdf' is your MosaicSDF instance and 'resolution' is the desired grid resolution
@@ -186,14 +187,30 @@ class MosaicSDFVisualizer:
         sdf_values *= sdf_scaler
 
         sdf_volume = to_numpy(sdf_values.reshape(resolution, resolution, resolution))
-        
+        # print(sdf_volume)
+        # print(sdf_volume.shape)
+        # print(sdf_volume < .5)
         # Run marching cubes to get vertices, faces, and normals
-        sdf_verts, sdf_faces, normals, values = marching_cubes(sdf_volume, level=0)
+        spacing = np.ones(3) * 2 / (resolution - 1)
+        sdf_verts, sdf_faces, normals, values = marching_cubes(sdf_volume, level=0,
+                                                               spacing=spacing
+                                                            #    ,mask=sdf_volume < .5
+                                                               )
+        # print('sdf_verts')        
+        # print(sdf_verts)        
         
-        sdf_offset = np.ones(3) * resolution / 2
-        sdf_max_span = np.ones(3) * resolution / 2
+        # sdf_offset = np.ones(3) * resolution / 2
+        sdf_offset = np.ones(3)
+        sdf_max_span = np.ones(3)
+        # sdf_max_span = np.ones(3) * resolution / 2
+        # print('sdf_offset')        
+        # print(sdf_offset)        
+        # print('sdf_max_span')        
+        # print(sdf_max_span)    
 
         sdf_verts, _, _ = ShapeSampler.normalize_vertices(sdf_verts, sdf_offset, sdf_max_span)
+        # print('sdf_verts')        
+        # print(sdf_verts)
         sdf_verts += np.array(extra_sdf_offset)
 
         # faces = faces + 1  # skimage has 0-indexed faces, while PyTorch3D expects 1-indexed

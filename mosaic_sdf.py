@@ -16,7 +16,8 @@ class MosaicSDF(nn.Module):
         :param grid_resolution: Resolution of each grid (assumed cubic for simplicity).
         """
         super(MosaicSDF, self).__init__()
-        
+        self.eps = 1e-4
+
         # self.shape_sampler = shape_sampler
         self.out_of_reach_const = 1
 
@@ -31,7 +32,7 @@ class MosaicSDF(nn.Module):
         
 
         if volume_scales is None:
-            min_rand_scale, max_rand_scale = .5, .9
+            min_rand_scale, max_rand_scale = .05, .3
             volume_scales = torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale
         self.scales = nn.Parameter(volume_scales)
         
@@ -51,29 +52,34 @@ class MosaicSDF(nn.Module):
         return points_sdf
 
 
-    def _compute_trilinear_interpolation_weights(self, relative_positions):
+    def _compute_trilinear_interpolation_weights(self, point_relative_positions):
         
         # Step 1: Create a tensor with each cell's value being its relative position within the tensor
-        rel_positions = torch.linspace(-1, 1, steps=self.k, device=relative_positions.device)
+        coord_span = torch.linspace(-1, 1, steps=self.k, device=point_relative_positions.device)
+        coord_step = 2 / (self.k - 1)
         grid_coords = torch.stack(
-            torch.meshgrid(rel_positions, rel_positions, rel_positions, indexing='ij'), 
+            torch.meshgrid(coord_span, coord_span, coord_span, indexing='ij'), 
             dim=-1)
 
         # Step 2: Expand dims for broadcasting
         grid_coords_expanded = grid_coords[None, None, ...]  # Shape: (1, 1, K, K, K, 3)
-        rel_pos_expanded = relative_positions[:, :, None, None, None, :] # Shape: (b, n, 1, 1, 1, 3)
+        rel_pos_expanded = point_relative_positions[:, :, None, None, None, :] # Shape: (b, n, 1, 1, 1, 3)
         #.unsqueeze(2).unsqueeze(3).unsqueeze(4)  
 
         # Step 3: Compute relative offsets
         in_grid_rel_offsets = rel_pos_expanded - grid_coords_expanded  # Shape: (b, n, K, K, K, 3)
-
+        in_grid_rel_offsets = in_grid_rel_offsets / coord_step
+        # print('in_grid_rel_offsets')
+        # print(in_grid_rel_offsets.shape)
+        # # print(in_grid_rel_offsets[:,:,1:3, 1:3, 1:3, :])
+        # print(in_grid_rel_offsets)
         # Step 4: Compute distances from offsets
-        # in_grid_distances = torch.linalg.norm(in_grid_rel_offsets, dim=-1, ord=1)  # Shape: (b, n, K, K, K)
-        in_grid_distances, _ = in_grid_rel_offsets.abs().max(dim=-1)
-        # print(f'in_grid_distances: {in_grid_distances}')
+        in_grid_distances = torch.linalg.norm(in_grid_rel_offsets, dim=-1, ord=2)  # Shape: (b, n, K, K, K)
+        # in_grid_distances, _ = in_grid_rel_offsets.abs().max(dim=-1)
+        # print(f'in_grid_distances:\n{in_grid_distances}')
         
         # Step 5: Zero-out distances greater than 1, 
-        in_grid_weights = torch.where(in_grid_distances <= 1.0, 
+        in_grid_weights = torch.where(in_grid_distances<= 1.0, 
                                       1 - in_grid_distances, 
                                       torch.zeros_like(in_grid_distances))
         # print(f'in_grid_weights: {in_grid_weights}')
@@ -101,22 +107,29 @@ class MosaicSDF(nn.Module):
         scales_expanded_to_points = self.scales[None, ..., None]
 
         grid_relative_pos_to_point = (points_expanded_to_grids - grids_expanded_to_points) / scales_expanded_to_points
-
+        # print('grid_relative_pos_to_point')
+        # print(grid_relative_pos_to_point)
         interpolation_weights = self._compute_trilinear_interpolation_weights(grid_relative_pos_to_point)
-        # print(f'grid_normalized_relative_positions: {grid_relative_pos_to_point}')
+        # print(f'interpolation_weights: {interpolation_weights}')
+        # print('interpolation_weights')
+        # print(interpolation_weights.shape)
+        # print(interpolation_weights)
         
         interpolation_values = self.mosaic_sdf_values[None, ...] * interpolation_weights
         interpolation_values = interpolation_values.sum(axis=(2,3,4))
         # Calculate each grid weight
         
-        grid_normalized_relative_dist, _ = grid_relative_pos_to_point.abs().max(dim=-1)
+        grid_normalized_relative_dist = torch.linalg.norm(grid_relative_pos_to_point, dim=-1, ord=2)
+        # grid_normalized_relative_dist, _ = grid_relative_pos_to_point.abs().max(dim=-1)
         # print(f'grid_normalized_relative_dist: {grid_normalized_relative_dist}')
-        
+        # print('grid_normalized_relative_dist')
+        # print(grid_normalized_relative_dist.shape)
+        # print(grid_normalized_relative_dist)
         # grid_normalized_relative_dist = torch.linalg.norm(grid_normalized_relative_positions, axis=-1)
         
         # w_i_hat
-        grid_weight = torch.relu(1 - grid_normalized_relative_dist)
-        
+        grid_weight = torch.relu(1 - grid_normalized_relative_dist + self.eps)
+        grid_weight = torch.ones_like(grid_weight)
         sum_of_weights = grid_weight.sum(axis=-1, keepdim=True)
         
         # TODO kernel crashes if I not detach normalized_grid_weight, maybe because of bug in autograd

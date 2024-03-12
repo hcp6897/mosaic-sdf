@@ -11,8 +11,10 @@ from pytorch3d.io import load_obj
 
 
 # TODO test point_mesh_distance from PT3D
+# TODO this class should be split into one that provides SDF and another that does operations on meshes
 class ShapeSampler(nn.Module):
-    def __init__(self, vertices, faces, normalize_shape=True):       
+    def __init__(self, vertices, faces, normalize_shape=True, 
+                 sdf_func=None, sdf_value_scaler=1):       
         super(ShapeSampler, self).__init__()
             
         self.vertices = vertices
@@ -21,25 +23,30 @@ class ShapeSampler(nn.Module):
         if normalize_shape:
             self.vertices, self.norm_center_offset, self.norm_max_extent = ShapeSampler.normalize_vertices(self.vertices)
 
-        tv = tracked_array(vertices.cpu().numpy())
-        tf = tracked_array(faces.verts_idx.cpu().numpy())
+        self.sdf_func = sdf_func
+        self.sdf_value_scaler = sdf_value_scaler
+        
+        if self.sdf_func is None:
+            tv = tracked_array(vertices.cpu().numpy())
+            tf = tracked_array(faces.verts_idx.cpu().numpy())
+            self.sdf_value_scaler = -1
+            self.sdf_func = SDF(tv, tf)
 
-        self.sdf_fun = SDF(tv, tf)
-
-        self.noise_scale = 0#noise_scale
+        self.noise_scale = 0 #noise_scale
 
 
     def forward(self, points):   
         # print('ShapeSampler.forward')
         # add check if points are not tensor, then bypassing numpy() conversion
         np_points = points.detach().cpu().numpy()
-        return torch.tensor(self.sdf_fun(np_points) * -1).to(points.device) 
+        # return torch.tensor(self.sdf_fun(np_points)).to(points.device) 
+        return torch.tensor(self.sdf_func(np_points) * self.sdf_value_scaler).to(points.device) 
 
     
     @abstractmethod
-    def from_file(file_path, device='cpu'):
+    def from_file(file_path, device='cpu', **kwargs):
         vertices, faces, aux = load_obj(file_path, device=device)
-        return ShapeSampler(vertices, faces)
+        return ShapeSampler(vertices, faces, **kwargs)
     
     
     @abstractmethod
