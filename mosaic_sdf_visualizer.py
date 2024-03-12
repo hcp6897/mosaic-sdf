@@ -22,7 +22,7 @@ from pytorch3d.io import load_obj
 import matplotlib.pyplot as plt
 from skimage.measure import marching_cubes
 import numpy as np
-from utils import to_numpy, to_tensor
+from utils import process_in_batches, to_numpy, to_tensor
 
 from mosaic_sdf import MosaicSDF
 from shape_sampler import ShapeSampler
@@ -110,6 +110,7 @@ class MosaicSDFVisualizer:
                             show_target_mesh=True,
                             show_boundary_mesh=True,
                             show_rasterized_sdf_mesh=True,
+                            offset_vertices=None,
                             **kwargs
                             ):
         """
@@ -140,7 +141,14 @@ class MosaicSDFVisualizer:
         
         if show_boundary_mesh:
             all_meshes.append(self.boundary_mesh)
-            
+        
+        if offset_vertices is not None:
+            all_meshes = [ShapeSampler.scale_offset_mesh(m, offset_vertices, torch.ones_like(offset_vertices))
+                                                         for m in all_meshes]
+
+        if 'vert_colors' in kwargs:
+            all_meshes = [MosaicSDFVisualizer.change_mesh_color(m, kwargs['vert_colors']) for m in all_meshes]
+        
         combined_mesh = join_meshes_as_scene(all_meshes)
 
         return combined_mesh
@@ -174,7 +182,9 @@ class MosaicSDFVisualizer:
     def rasterize_sdf(sdf_func, resolution=8, device = 'cpu', 
                       vert_colors=[.25, .25, .25],
                       sdf_scaler=-1,
-                      extra_sdf_offset=[0,0,0]):
+                      extra_sdf_offset=[0,0,0],
+                      batch_size=128):
+        
         
         # # Assuming 'mosaic_sdf' is your MosaicSDF instance and 'resolution' is the desired grid resolution
         grid_points = torch.stack(torch.meshgrid(
@@ -183,10 +193,7 @@ class MosaicSDFVisualizer:
             torch.linspace(-1, 1, resolution), indexing='ij'
         ), dim=-1).reshape(-1, 3)#.to(device)
         
-        # if sdf_func is None:
-        #     sdf_func = self.mosaic_sdf
-
-        sdf_values = sdf_func(grid_points.to(device))
+        sdf_values = process_in_batches(grid_points.to(device), sdf_func, batch_size)
         sdf_values *= sdf_scaler
 
         sdf_volume = to_numpy(sdf_values.reshape(resolution, resolution, resolution))
@@ -236,3 +243,17 @@ class MosaicSDFVisualizer:
         mesh = Meshes(verts=[sdf_verts], faces=[sdf_faces], textures=textures).to(device)
         
         return mesh
+
+
+    @abstractmethod
+    def change_mesh_color(mesh, new_color):
+        new_mesh = mesh.clone()
+        
+        total_verts = mesh.verts_list()[0].shape[0]
+        verts_rgb = torch.ones((1, total_verts, 3), device=new_mesh.device)
+        verts_rgb *= to_tensor(new_color, device=new_mesh.device)
+
+        textures = Textures(verts_rgb=verts_rgb)
+        new_mesh.textures = textures
+        
+        return new_mesh
