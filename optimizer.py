@@ -23,7 +23,8 @@ class MosaicSDFOptimizer:
         self.model = MosaicSDF(
             grid_resolution=config.get('grid_resolution', 7),
             n_grids=n_grids,
-            volume_centers=volume_centers
+            volume_centers=volume_centers,
+            mosaic_scale_multiplier=config.get('mosaic_scale_multiplier', 1)
         ).to(self.device)
         
         self.optimizer = torch.optim.Adam(
@@ -115,7 +116,7 @@ class MosaicSDFOptimizer:
             
             loss = loss / gradient_accumulation_steps  # Scale loss
             loss = loss * self.config.get('loss_scaler', 1)
-            
+
             loss.backward()
 
             if (iteration + 1) % gradient_accumulation_steps == 0 or iteration == self.num_iterations - 1:

@@ -9,7 +9,7 @@ from shape_sampler import ShapeSampler
 
 class MosaicSDF(nn.Module):
     def __init__(self, grid_resolution=7, n_grids=1024, 
-                 volume_centers=None, volume_scales=None,
+                 volume_centers=None, volume_scales=None, mosaic_scale_multiplier=1,
                  device='cuda'):
         """
         Initialize the MosaicSDF representation.
@@ -40,10 +40,11 @@ class MosaicSDF(nn.Module):
             mean_min_l2_dist = min_l2_distance(volume_centers.to(device)).mean()
             volume_scales = torch.ones((n_grids,), device=device) * mean_min_l2_dist
 
-        self.scales = nn.Parameter(volume_scales)
+        self.scales = nn.Parameter(volume_scales * mosaic_scale_multiplier)
         
         init_mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution)
         self.register_buffer('mosaic_sdf_values', init_mosaic_sdf_values)
+
 
     def forward(self, points):
         """
@@ -135,18 +136,36 @@ class MosaicSDF(nn.Module):
         
         # w_i_hat
         grid_weight = torch.relu(1 - grid_normalized_relative_dist + self.eps)
-        grid_weight = torch.ones_like(grid_weight)
+        
         sum_of_weights = grid_weight.sum(axis=-1, keepdim=True)
         
         # TODO kernel crashes if I not detach normalized_grid_weight, maybe because of bug in autograd
         normalized_grid_weight = torch.nan_to_num(
             (grid_weight / sum_of_weights).detach()
             , nan=0.0)
+        # print('norm sum:', normalized_grid_weight)
+        # Use a mask to identify areas with very low weight sums (not covered by grids)
+        uncovered_mask = sum_of_weights < self.eps
+        # print('0:', uncovered_mask.view(-1).shape)
+        # print('mask:', uncovered_mask)
+        # For uncovered areas, use out_of_reach_const; otherwise, compute as before
         
-        point_sdf = torch.nan_to_num(
-            torch.sum(interpolation_values * normalized_grid_weight, axis=-1),
-            nan=self.out_of_reach_const)
+        # print('a:', points.shape[:1])
         
+        # point_sdf_ = torch.nan_to_num(
+        #     torch.sum(interpolation_values * normalized_grid_weight, axis=-1),
+        #     nan=self.out_of_reach_const)
+        # print('b:', point_sdf_.shape)
+
+        point_sdf = torch.where(
+            uncovered_mask.view(-1),
+            torch.full(points.shape[:1], self.out_of_reach_const, device=points.device),
+            torch.sum(interpolation_values * normalized_grid_weight, axis=-1)
+        )
+        # print('c:', point_sdf.shape)
+        # print('d:', torch.sum(interpolation_values * normalized_grid_weight, axis=-1).shape)
+        # print('e:', torch.full(points.shape[:1], self.out_of_reach_const, device=points.device).shape)
+
         return point_sdf
     
 

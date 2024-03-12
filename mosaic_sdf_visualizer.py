@@ -195,7 +195,7 @@ class MosaicSDFVisualizer:
         
         sdf_values = process_in_batches(grid_points.to(device), sdf_func, batch_size)
         sdf_values *= sdf_scaler
-
+        # print(sdf_values.shape)
         sdf_volume = to_numpy(sdf_values.reshape(resolution, resolution, resolution))
         # print(sdf_volume)
         # print(sdf_volume.shape)
