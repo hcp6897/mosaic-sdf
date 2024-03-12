@@ -76,21 +76,24 @@ class MosaicSDFVisualizer:
         
 
         self.template_mesh = MosaicSDFVisualizer.create_mesh_from_verts(template_vertices, 
-                                                    template_faces, vert_colors = [.8, 0, 0],
+                                                    template_faces.verts_idx, vert_colors = [.8, 0, 0],
                                                   device=self.device)
 
         self.boundary_mesh = MosaicSDFVisualizer.create_mesh_from_verts(template_vertices, 
-                                                    template_faces, vert_colors = [0, 0, .5],
+                                                    template_faces.verts_idx, vert_colors = [0, 0, .5],
                                                   device=self.device)
 
         self.shape_target_mesh = MosaicSDFVisualizer.create_mesh_from_verts(self.shape_sampler.vertices, 
-                                                  self.shape_sampler.faces, 
+                                                  self.shape_sampler.verts_idx, 
                                                   vert_colors = [0, .3, 0],
                                                   device=self.device)
     
 
     @abstractmethod
-    def create_mesh_from_verts(vertices, faces, vert_colors = [.6, 0, 0], device='cpu'):
+    def create_mesh_from_verts(vertices, verts_idx, vert_colors = [.6, 0, 0], device='cpu'):
+        vertices = to_tensor(vertices, device)
+        verts_idx = to_tensor(verts_idx, device)
+
         total_verts = vertices.shape[0]
         verts_rgb = torch.ones((1, total_verts, 3), device=device)  # White color for all vertices
         verts_rgb *= torch.tensor(vert_colors, device=device)
@@ -98,8 +101,8 @@ class MosaicSDFVisualizer:
         textures = Textures(verts_rgb=verts_rgb)
 
         # Create the mesh
-        return Meshes(verts=[vertices.to(device)], 
-                      faces=[faces.verts_idx.to(device)], 
+        return Meshes(verts=[vertices], 
+                      faces=[verts_idx], 
                       textures=textures).to(device)
 
 

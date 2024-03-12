@@ -8,17 +8,21 @@ from einops import rearrange
 from trimesh.caching import tracked_array
 from pysdf import SDF
 from pytorch3d.io import load_obj
-
+import point_cloud_utils as pcu
+from utils import to_tensor, to_numpy
 
 # TODO test point_mesh_distance from PT3D
 # TODO this class should be split into one that provides SDF and another that does operations on meshes
 class ShapeSampler(nn.Module):
-    def __init__(self, vertices, faces, normalize_shape=True, 
+    def __init__(self, vertices, verts_idx, normalize_shape=True, 
                  sdf_func=None, sdf_value_scaler=1):       
         super(ShapeSampler, self).__init__()
             
         self.vertices = vertices
-        self.faces = faces
+        self.verts_idx = verts_idx
+
+        self.np_vertices = to_numpy(self.vertices)
+        self.np_verts_idx = to_numpy(self.verts_idx)
 
         if normalize_shape:
             self.vertices, self.norm_center_offset, self.norm_max_extent = ShapeSampler.normalize_vertices(self.vertices)
@@ -28,7 +32,7 @@ class ShapeSampler(nn.Module):
         
         if self.sdf_func is None:
             tv = tracked_array(vertices.cpu().numpy())
-            tf = tracked_array(faces.verts_idx.cpu().numpy())
+            tf = tracked_array(verts_idx.cpu().numpy())
             self.sdf_value_scaler = -1
             self.sdf_func = SDF(tv, tf)
 
@@ -38,15 +42,40 @@ class ShapeSampler(nn.Module):
     def forward(self, points):   
         # print('ShapeSampler.forward')
         # add check if points are not tensor, then bypassing numpy() conversion
-        np_points = points.detach().cpu().numpy()
+        np_points = to_numpy(points)
         # return torch.tensor(self.sdf_fun(np_points)).to(points.device) 
         return torch.tensor(self.sdf_func(np_points) * self.sdf_value_scaler).to(points.device) 
 
-    
+
+    def sample_n_random_points(self, n_points):
+        
+        # print('3 ->', vertices.shape, verts_idx.shape)
+
+        f_i, bc = pcu.sample_mesh_random(self.np_vertices, 
+                                         self.np_verts_idx, 
+                                         num_samples=n_points)
+        # print(f_i)
+        # print(bc)
+        # print('4 ->', f_i.shape, bc.shape)
+        # Use the face indices and barycentric coordinate to compute sample positions and normals
+        v_sampled = pcu.interpolate_barycentric_coords(self.np_verts_idx, f_i, bc, self.np_vertices)
+        # print(v_sampled)
+        # return torch.rand_like(v_sampled, device=self.vertices.device)
+        return to_tensor(v_sampled, device=self.vertices.device)
+
+
     @abstractmethod
-    def from_file(file_path, device='cpu', **kwargs):
-        vertices, faces, aux = load_obj(file_path, device=device)
-        return ShapeSampler(vertices, faces, **kwargs)
+    def from_file(file_path, device='cpu', make_watertight=True, wt_resolution=10_000, **kwargs):
+        # vertices, faces, aux = load_obj(file_path, device=device)
+        vertices, verts_idx = pcu.load_mesh_vf(file_path)
+        # print('1 ->', vertices.shape, verts_idx.shape)
+
+        if make_watertight:
+            vertices, verts_idx = pcu.make_mesh_watertight(vertices, verts_idx, resolution=wt_resolution)
+        # print('2 ->', vertices.shape, verts_idx.shape)
+        return ShapeSampler(to_tensor(vertices, device), 
+                            to_tensor(verts_idx, device),
+                            **kwargs)
     
     
     @abstractmethod

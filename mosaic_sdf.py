@@ -32,7 +32,7 @@ class MosaicSDF(nn.Module):
         
 
         if volume_scales is None:
-            min_rand_scale, max_rand_scale = .05, .3
+            min_rand_scale, max_rand_scale = .15, .25
             volume_scales = torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale
         self.scales = nn.Parameter(volume_scales)
         

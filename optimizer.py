@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from ray import tune
@@ -5,15 +6,24 @@ from shape_sampler import ShapeSampler
 from mosaic_sdf import MosaicSDF
 import os
 from torchviz import make_dot
+from utils import to_numpy, to_tensor
 
 class MosaicSDFOptimizer:
     def __init__(self, config):
         self.device = config['device'] #torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.shape_sampler: ShapeSampler =config['shape_sampler']
-                                  
+        self.shape_sampler: ShapeSampler = config['shape_sampler']
+
+        n_grids=config.get('n_grids', 1024)
+
+        volume_centers = torch.tensor(
+            self.shape_sampler.sample_n_random_points(n_grids),
+            device=self.device
+        )
+
         self.model = MosaicSDF(
             grid_resolution=config.get('grid_resolution', 7),
-            n_grids=config.get('n_grids', 1024),
+            n_grids=n_grids,
+            volume_centers=volume_centers
         ).to(self.device)
         
         self.optimizer = torch.optim.Adam(
@@ -78,12 +88,21 @@ class MosaicSDFOptimizer:
         d = 3
     
         for iteration in range(self.num_iterations):
-
-            points_x = (torch.rand((self.points_sample_size, d), 
-                                  device=self.device, requires_grad=False) - 1) * 2
-            points_y = (torch.rand((self.points_sample_size, d), 
-                                  device=self.device, requires_grad=True) - 1) * 2
             
+            
+            if False:
+                points_x = (torch.rand((self.points_sample_size, d), 
+                                    device=self.device, requires_grad=False) - 1) * 2
+                points_y = (torch.rand((self.points_sample_size, d), 
+                                    device=self.device, requires_grad=True) - 1) * 2
+            else:
+                points = self.shape_sampler.sample_n_random_points(self.points_sample_size * 2)
+
+                points += (torch.rand_like(points) - .5) * self.config.get('rand_point_spread', .03) * 2
+                
+                points_x = points[:points.shape[0] // 2]
+                points_y = points[points.shape[0] // 2:]
+                points_y.requires_grad=True
 
             self.optimizer.zero_grad()
             loss, l1_loss, l2_loss = self.compute_loss(points_x, points_y)

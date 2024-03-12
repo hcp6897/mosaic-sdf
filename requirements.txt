@@ -5,6 +5,7 @@ trimesh
 pysdf
 # mesh-to-sdf
 torchviz
+point-cloud-utils
 
 pytest
 

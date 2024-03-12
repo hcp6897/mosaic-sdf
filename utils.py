@@ -13,7 +13,7 @@ def to_numpy(var):
 def to_tensor(var, device):
     if isinstance(var, np.ndarray):
         # Convert NumPy array to PyTorch tensor
-        return torch.from_numpy(var, device=device)
+        return torch.tensor(var, device=device)
     else:
         # Assume it's already a PyTorch tensor or compatible type
-        return var
+        return var.to(device)
