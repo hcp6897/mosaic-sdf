@@ -41,7 +41,8 @@ class MosaicSDFOptimizer:
         self.points_sample_size = config.get('points_sample_size', 64)
         self.points_random_sampling = config.get('points_random_sampling', False)
         self.points_random_spread = self.config.get('points_random_spread', .03)
-
+        
+        self.model.update_sdf_values(self.shape_sampler)
 
     def compute_loss(self, points_x, points_y):
      
@@ -76,7 +77,7 @@ class MosaicSDFOptimizer:
         l2_loss = torch.norm(fx_yj_grad - fs_yj_grad, p=2) / len(points_y)
         
         # Combined Loss
-        loss = l1_loss + self.lambda_val * l2_loss
+        loss = (1 - self.lambda_val) * l1_loss + self.lambda_val * l2_loss
         
         return loss, l1_loss, l2_loss #, an_num_grad_loss
 
@@ -85,6 +86,7 @@ class MosaicSDFOptimizer:
         self.model.train()
         # total_loss = 0
         d = 3
+        gradient_accumulation_steps = self.config['gradient_accumulation_steps']
 
         test_points = self.shape_sampler.sample_n_random_points(self.val_size * 2,         
                         rand_offset=self.points_random_spread,
@@ -105,24 +107,33 @@ class MosaicSDFOptimizer:
                 
                 points_x = points[:points.shape[0] // 2]
                 points_y = points[points.shape[0] // 2:]
-                points_y.requires_grad=True
+                points_y.requires_grad=True           
 
-            self.model.update_sdf_values(self.shape_sampler)
-
+            
             self.optimizer.zero_grad()
             loss, l1_loss, l2_loss = self.compute_loss(points_x, points_y)
             
-            # loss = l1_loss  
-
+            loss = loss / gradient_accumulation_steps  # Scale loss
+            loss = loss * self.config.get('loss_scaler', 1)
+            
             loss.backward()
 
-            if iteration == 0 and self.config['output_graph']:
-                # Visualization after computing the loss
-                graph = make_dot(loss, params=dict(self.model.named_parameters()))
-                graph.render(f'out/computation_graph_{iteration}', format='png')  # Saves the graph as 'computation_graph.png'
+            if (iteration + 1) % gradient_accumulation_steps == 0 or iteration == self.num_iterations - 1:
+                self.optimizer.step()  # Update parameters
+                self.optimizer.zero_grad()  # Reset gradients
+                self.model.update_sdf_values(self.shape_sampler)
+            # else:
+            # loss.backward()
 
+            # self.optimizer.step()
+            # self.model.update_sdf_values(self.shape_sampler)
+                
+            
 
-            self.optimizer.step()
+            # loss = l1_loss  
+
+        
+
             stats = {
                 'step': iteration,
                 'train_loss': loss.item(),
@@ -130,6 +141,7 @@ class MosaicSDFOptimizer:
                 'train_l2_loss': l2_loss.item(),
                 # 'an_num_loss': an_num_grad_loss.item()
             }
+            
             if iteration % self.config.get('print_loss_iterations', 1) == 0:
                 
                 self.model.eval()
@@ -138,7 +150,7 @@ class MosaicSDFOptimizer:
                 val_l1_losses = []
                 val_l2_losses = []
                 
-                for points in torch.split(test_points, self.points_sample_size):
+                for points in torch.split(test_points, self.config['points_eval_sample_size'] * 2):
                     points_x = points[:points.shape[0] // 2]
                     points_y = points[points.shape[0] // 2:]
                     points_y.requires_grad=True
@@ -166,6 +178,12 @@ class MosaicSDFOptimizer:
                 self.model.train()
             
             
+            if iteration == 0 and self.config['output_graph']:
+                # Visualization after computing the loss
+                graph = make_dot(loss, params=dict(self.model.named_parameters()))
+                graph.render(f'out/computation_graph_{iteration}', format='png')  # Saves the graph as 'computation_graph.png'
+
+
         # tune.report(loss=average_loss)  
         # wandb.report(stats)  
 

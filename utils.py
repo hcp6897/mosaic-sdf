@@ -55,3 +55,15 @@ def process_in_batches(tensor, func, batch_size):
 
     # Concatenate all batch results into a single tensor
     return torch.cat(results, dim=0)
+
+
+def min_l2_distance(tensor):
+    diffs = tensor.unsqueeze(1) - tensor.unsqueeze(0)  # Pairwise subtraction
+    dists = torch.sqrt((diffs ** 2).sum(-1))  # Squared L2 norm
+    
+    inf_diag = torch.diag(torch.full((tensor.size(0),), float('inf'))).to(tensor.device)
+    dists += inf_diag
+
+    min_dists, _ = dists.min(dim=1)
+    
+    return min_dists

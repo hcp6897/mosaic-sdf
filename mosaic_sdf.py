@@ -4,10 +4,13 @@ import numpy as np
 
 from einops import rearrange
 
+from utils import min_l2_distance
 from shape_sampler import ShapeSampler
 
 class MosaicSDF(nn.Module):
-    def __init__(self, grid_resolution=7, n_grids=1024, volume_centers=None, volume_scales=None):
+    def __init__(self, grid_resolution=7, n_grids=1024, 
+                 volume_centers=None, volume_scales=None,
+                 device='cuda'):
         """
         Initialize the MosaicSDF representation.
         
@@ -30,10 +33,13 @@ class MosaicSDF(nn.Module):
         # Assuming volume_centers, scales, and sdf_values are learnable parameters
         self.volume_centers = nn.Parameter(volume_centers)  
         
-
         if volume_scales is None:
-            min_rand_scale, max_rand_scale = .15, .25
-            volume_scales = torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale
+            # min_rand_scale, max_rand_scale = .15, .25
+            # volume_scales = torch.rand((n_grids,)) * (max_rand_scale - min_rand_scale) + min_rand_scale
+            
+            mean_min_l2_dist = min_l2_distance(volume_centers.to(device)).mean()
+            volume_scales = torch.ones((n_grids,), device=device) * mean_min_l2_dist
+
         self.scales = nn.Parameter(volume_scales)
         
         init_mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution)
