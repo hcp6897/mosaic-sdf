@@ -47,21 +47,26 @@ class ShapeSampler(nn.Module):
         return torch.tensor(self.sdf_func(np_points) * self.sdf_value_scaler).to(points.device) 
 
 
-    def sample_n_random_points(self, n_points):
+    def sample_n_random_points(self, n_points, rand_offset=None, random_seed=42):
         
         # print('3 ->', vertices.shape, verts_idx.shape)
 
         f_i, bc = pcu.sample_mesh_random(self.np_vertices, 
                                          self.np_verts_idx, 
-                                         num_samples=n_points)
+                                         num_samples=n_points, 
+                                         random_seed=random_seed)
         # print(f_i)
         # print(bc)
         # print('4 ->', f_i.shape, bc.shape)
+
         # Use the face indices and barycentric coordinate to compute sample positions and normals
         v_sampled = pcu.interpolate_barycentric_coords(self.np_verts_idx, f_i, bc, self.np_vertices)
-        # print(v_sampled)
-        # return torch.rand_like(v_sampled, device=self.vertices.device)
-        return to_tensor(v_sampled, device=self.vertices.device)
+        v_sampled = to_tensor(v_sampled, device=self.vertices.device)
+        
+        if rand_offset is not None:
+            v_sampled += (torch.rand_like(v_sampled) - .5) * rand_offset * 2
+        
+        return v_sampled
 
 
     @abstractmethod
