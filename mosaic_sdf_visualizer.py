@@ -28,8 +28,7 @@ from mosaic_sdf import MosaicSDF
 from shape_sampler import ShapeSampler
 
 class MosaicSDFVisualizer:
-    def __init__(self, mosaic_sdf: MosaicSDF, shape_sampler: ShapeSampler, device, template_mesh_path:str):
-        self.mosaic_sdf = mosaic_sdf
+    def __init__(self, shape_sampler: ShapeSampler, device, template_mesh_path:str):
         self.shape_sampler = shape_sampler
         self.device = device #torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         
@@ -106,7 +105,9 @@ class MosaicSDFVisualizer:
                       textures=textures).to(device)
 
 
-    def create_state_meshes(self, show_mosaic_grids=True, 
+    def create_state_meshes(self, 
+                            mosaic_sdf: MosaicSDF,
+                            show_mosaic_grids=True, 
                             show_target_mesh=True,
                             show_boundary_mesh=True,
                             show_rasterized_sdf_mesh=True,
@@ -116,8 +117,8 @@ class MosaicSDFVisualizer:
         """
         Visualizes the MosaicSDF grids as semi-transparent cubes.
         """
-        volume_centers = self.mosaic_sdf.volume_centers
-        scales = self.mosaic_sdf.scales
+        volume_centers = mosaic_sdf.volume_centers
+        scales = mosaic_sdf.scales
                 
         # materials = Materials(
         #     device=self.device,
@@ -131,7 +132,8 @@ class MosaicSDFVisualizer:
 
 
         if show_rasterized_sdf_mesh:
-            all_meshes.append(MosaicSDFVisualizer.rasterize_sdf(self.mosaic_sdf, device=self.device, **kwargs))
+            all_meshes.append(MosaicSDFVisualizer.rasterize_sdf(mosaic_sdf, 
+                                                                device=self.device, **kwargs))
 
 
         if show_mosaic_grids:

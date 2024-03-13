@@ -95,12 +95,17 @@ class MosaicSDF(nn.Module):
         # weights = distances * distances_mask
 
         # Step 6: Normalize weights
-        in_grid_weights_sum = in_grid_weights.sum(dim=(2,3,4))#.detach()
-        in_grid_weights_normalized = in_grid_weights / in_grid_weights_sum[:, :, None, None, None]
+        in_grid_weights_sum = in_grid_weights.sum(dim=(2,3,4))[:, :, None, None, None]
+        # in_grid_weights_normalized = in_grid_weights / in_grid_weights_sum
 
-        # set zeros where have nan because divided by zero
-        # in_grid_weights_normalized[in_grid_weights_normalized != in_grid_weights_normalized] = 0
-        in_grid_weights_normalized = torch.nan_to_num(in_grid_weights_normalized, nan=0.0)
+        # # set zeros where have nan because divided by zero
+        # # in_grid_weights_normalized[in_grid_weights_normalized != in_grid_weights_normalized] = 0
+        # in_grid_weights_normalized = torch.nan_to_num(in_grid_weights_normalized, nan=0.0)
+
+        in_grid_weights_normalized = torch.where(
+            in_grid_weights_sum > self.eps, 
+            in_grid_weights / in_grid_weights_sum, torch.zeros_like(in_grid_weights))
+        
         # print(f'in_grid_weights_normalized: {in_grid_weights_normalized}')
         
         return in_grid_weights_normalized
@@ -124,9 +129,13 @@ class MosaicSDF(nn.Module):
         
         interpolation_values = self.mosaic_sdf_values[None, ...] * interpolation_weights
         interpolation_values = interpolation_values.sum(axis=(2,3,4))
+        debug_interpolation_weights = interpolation_weights.sum(axis=(1,2,3,4))[:,None]
+        # print('debug_interpolation_weights')
+        # print(debug_interpolation_weights.shape)
         # Calculate each grid weight
         
-        grid_normalized_relative_dist = torch.linalg.norm(grid_relative_pos_to_point, dim=-1, ord=2)
+        grid_normalized_relative_dist = torch.linalg.norm(
+            grid_relative_pos_to_point, dim=-1, ord=2)
         # grid_normalized_relative_dist, _ = grid_relative_pos_to_point.abs().max(dim=-1)
         # print(f'grid_normalized_relative_dist: {grid_normalized_relative_dist}')
         # print('grid_normalized_relative_dist')
@@ -140,12 +149,24 @@ class MosaicSDF(nn.Module):
         sum_of_weights = grid_weight.sum(axis=-1, keepdim=True)
         
         # TODO kernel crashes if I not detach normalized_grid_weight, maybe because of bug in autograd
-        normalized_grid_weight = torch.nan_to_num(
-            (grid_weight / sum_of_weights).detach()
-            , nan=0.0)
+        # normalized_grid_weight = torch.nan_to_num(
+        #     (grid_weight / sum_of_weights).detach()
+        #     , nan=0.0)
+        normalized_grid_weight = torch.where(
+            sum_of_weights > self.eps, 
+            grid_weight / sum_of_weights, torch.zeros_like(grid_weight))
+
         # print('norm sum:', normalized_grid_weight)
         # Use a mask to identify areas with very low weight sums (not covered by grids)
-        uncovered_mask = sum_of_weights < self.eps
+        # uncovered_mask = sum_of_weights < self.eps
+        # DEBUG
+        # print('sum_of_weights.shape')
+        # print(sum_of_weights.shape)
+        # print('debug_interpolation_weights.shape')
+        # print(debug_interpolation_weights.shape)
+        # print('uncovered_mask.shape')
+        # print(uncovered_mask.shape)
+        
         # print('0:', uncovered_mask.view(-1).shape)
         # print('mask:', uncovered_mask)
         # For uncovered areas, use out_of_reach_const; otherwise, compute as before
@@ -157,11 +178,17 @@ class MosaicSDF(nn.Module):
         #     nan=self.out_of_reach_const)
         # print('b:', point_sdf_.shape)
 
-        point_sdf = torch.where(
-            uncovered_mask.view(-1),
-            torch.full(points.shape[:1], self.out_of_reach_const, device=points.device),
-            torch.sum(interpolation_values * normalized_grid_weight, axis=-1)
-        )
+        if True:
+            # uncovered_mask = (sum_of_weights < self.eps) | (debug_interpolation_weights < self.eps)
+            uncovered_mask = sum_of_weights < self.eps
+
+            point_sdf = torch.where(
+                uncovered_mask.view(-1),
+                torch.full(points.shape[:1], self.out_of_reach_const, device=points.device),
+                torch.sum(interpolation_values * normalized_grid_weight, axis=-1)
+            )
+        else:
+            point_sdf = torch.sum(interpolation_values * normalized_grid_weight, axis=-1)
         # print('c:', point_sdf.shape)
         # print('d:', torch.sum(interpolation_values * normalized_grid_weight, axis=-1).shape)
         # print('e:', torch.full(points.shape[:1], self.out_of_reach_const, device=points.device).shape)
@@ -197,3 +224,4 @@ class MosaicSDF(nn.Module):
         sdf_values = rearrange(sdf_values, '(n k1 k2 k3) -> n k1 k2 k3', n=self.n_grids, k1=self.k, k2=self.k, k3=self.k)
         
         return sdf_values
+    

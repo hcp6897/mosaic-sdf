@@ -21,20 +21,21 @@ class ShapeSampler(nn.Module):
         self.vertices = vertices
         self.verts_idx = verts_idx
 
-        self.np_vertices = to_numpy(self.vertices)
-        self.np_verts_idx = to_numpy(self.verts_idx)
-
         if normalize_shape:
             self.vertices, self.norm_center_offset, self.norm_max_extent = ShapeSampler.normalize_vertices(self.vertices)
+
+        self.np_vertices = to_numpy(self.vertices)
+        self.np_verts_idx = to_numpy(self.verts_idx)
 
         self.sdf_func = sdf_func
         self.sdf_value_scaler = sdf_value_scaler
         
         if self.sdf_func is None:
-            tv = tracked_array(vertices.cpu().numpy())
-            tf = tracked_array(verts_idx.cpu().numpy())
+            tv = tracked_array(self.vertices.cpu().numpy())
+            tf = tracked_array(self.verts_idx.cpu().numpy())
             self.sdf_value_scaler = -1
             self.sdf_func = SDF(tv, tf)
+        
 
         self.noise_scale = 0 #noise_scale
 

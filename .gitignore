@@ -10,7 +10,7 @@ __pycache__
 !**/*.ipynb
 !**/*.txt
 # !data/cube_wireframe.obj
-!data/*
+# !data/*
 
 *output/
 *wandb/

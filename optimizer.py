@@ -10,6 +10,7 @@ import sys
 from torchviz import make_dot
 from utils import to_numpy, to_tensor
 import wandb
+from pathlib import Path
 
 class MosaicSDFOptimizer(tune.Trainable):
     def setup(self, config):
@@ -38,6 +39,7 @@ class MosaicSDFOptimizer(tune.Trainable):
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=config['lr'],
+            betas=(config['b1'], config['b2']),
             weight_decay=config['weight_decay'],
         )
 
@@ -106,7 +108,7 @@ class MosaicSDFOptimizer(tune.Trainable):
         gradient_accumulation_steps = self.config['gradient_accumulation_steps']
 
         test_points = self.shape_sampler.sample_n_random_points(self.val_size * 2,         
-                        rand_offset=self.points_random_spread,
+                        rand_offset=self.config['val_points_random_spread'],
                         random_seed=42)
         
         n_steps = self.config['points_in_epoch'] // self.points_sample_size
@@ -181,13 +183,14 @@ class MosaicSDFOptimizer(tune.Trainable):
                     'val_l2_loss': np.mean(val_l2_losses),
                 }
                 
-                sys.stdout.write(f"\nIteration {stats['step']}, val Loss: {stats['val_loss']:.4f}, "
-                      f"val L1: {stats['val_l1_loss']:.4f}, val L2: {stats['val_l2_loss']:.4f} ||| "
-                      f"train Loss: {stats['train_loss']:.4f} "
-                      f"train L1: {stats['train_l1_loss']:.4f}, train L2: {stats['train_l2_loss']:.4f} "
-                    #   f"An2Num Loss: {stats['an_num_loss']:.4f}"
-                      )
-                sys.stdout.flush()
+                if self.config.get('log_to_console', True):
+                    sys.stdout.write(f"\nIteration {stats['step']}, val Loss: {stats['val_loss']:.4f}, "
+                        f"val L1: {stats['val_l1_loss']:.4f}, val L2: {stats['val_l2_loss']:.4f} ||| "
+                        f"train Loss: {stats['train_loss']:.4f} "
+                        f"train L1: {stats['train_l1_loss']:.4f}, train L2: {stats['train_l2_loss']:.4f} "
+                        #   f"An2Num Loss: {stats['an_num_loss']:.4f}"
+                        )
+                    sys.stdout.flush()
                 
                 if self.config['log_to_wandb'] and iteration != n_steps - 1:
                     wandb.log(stats)
@@ -213,7 +216,13 @@ class MosaicSDFOptimizer(tune.Trainable):
         
 
     def save_checkpoint(self, checkpoint_dir):
-        checkpoint_path = os.path.join(checkpoint_dir, "model.pth")
+        # dir_path = os.path.join(checkpoint_dir, self.config['project_name'])
+        dir_path = checkpoint_dir
+        Path(dir_path).mkdir(parents=True, exist_ok=True)
+
+        checkpoint_path = os.path.join(dir_path, "model.pth")
+
+        print(f'model saved to: {checkpoint_path}')
         torch.save(self.model.state_dict(), checkpoint_path)
         
 
