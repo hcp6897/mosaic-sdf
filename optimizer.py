@@ -190,7 +190,7 @@ class MosaicSDFOptimizer(tune.Trainable):
                 sys.stdout.flush()
                 
                 if self.config['log_to_wandb'] and iteration != n_steps - 1:
-                    wandb.report(stats)
+                    wandb.log(stats)
                 
                 self.model.train()
             
@@ -203,7 +203,7 @@ class MosaicSDFOptimizer(tune.Trainable):
 
         stats['epoch_time'] = time.time() - epoch_time_start
         if self.config['log_to_wandb'] and iteration != n_steps - 1:
-            wandb.report(stats)
+            wandb.log(stats)
         # tune.report(loss=average_loss)  
         
         return stats
