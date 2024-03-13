@@ -6,9 +6,8 @@ pysdf
 # mesh-to-sdf
 torchviz
 point-cloud-utils
+wandb
 
 pytest
 
-# 
-# sudo apt-get install graphviz
-# 
+# some requirements might be missing ))

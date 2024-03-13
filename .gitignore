@@ -4,11 +4,13 @@ __pycache__
 !*/
 
 !.gitignore
+!setup.sh
 
 !**/*.py
 !**/*.ipynb
 !**/*.txt
-!data/cube_wireframe.obj
+# !data/cube_wireframe.obj
+!data/*
 
 *output/
 *wandb/

@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -5,45 +6,58 @@ from ray import tune
 from shape_sampler import ShapeSampler
 from mosaic_sdf import MosaicSDF
 import os
+import sys
 from torchviz import make_dot
 from utils import to_numpy, to_tensor
+import wandb
 
-class MosaicSDFOptimizer:
-    def __init__(self, config):
-        self.device = config['device'] #torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.shape_sampler: ShapeSampler = config['shape_sampler']
+class MosaicSDFOptimizer(tune.Trainable):
+    def setup(self, config):
+        
+        # choosing right seed value is crucial )))
+        torch.manual_seed(42) 
+
+        self.device = config['device']
+        self.shape_sampler: ShapeSampler = ShapeSampler.from_file(config['shape_path'], device=self.device)
 
         n_grids=config.get('n_grids', 1024)
 
-        volume_centers = torch.tensor(
-            self.shape_sampler.sample_n_random_points(n_grids),
-            device=self.device
-        )
+        volume_centers = self.shape_sampler.sample_n_random_points(n_grids)
+        # volume_centers = torch.tensor(
+        #     self.shape_sampler.sample_n_random_points(n_grids),
+        #     device=self.device
+        # )
 
         self.model = MosaicSDF(
-            grid_resolution=config.get('grid_resolution', 7),
+            grid_resolution=config['grid_resolution'],
             n_grids=n_grids,
             volume_centers=volume_centers,
-            mosaic_scale_multiplier=config.get('mosaic_scale_multiplier', 1)
+            mosaic_scale_multiplier=config['mosaic_scale_multiplier']
         ).to(self.device)
         
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
-            lr=config.get('lr', 1e-3),
-            weight_decay=config.get('weight_decay', 0),
+            lr=config['lr'],
+            weight_decay=config['weight_decay'],
         )
 
         self.lambda_val = config['lambda_val']
-        self.num_iterations = config['num_iterations']
         self.val_size = config['val_size']
 
         # self.criterion = nn.MSELoss()  # Example loss function; adjust as needed
         self.config = config
-        self.points_sample_size = config.get('points_sample_size', 64)
-        self.points_random_sampling = config.get('points_random_sampling', False)
-        self.points_random_spread = self.config.get('points_random_spread', .03)
+        self.points_sample_size = config['points_sample_size']
+        self.points_random_sampling = config['points_random_sampling']
+        self.points_random_spread = self.config['points_random_spread']
         
         self.model.update_sdf_values(self.shape_sampler)
+
+        if config['log_to_wandb']:
+            wandb.init(project=config['project_name'], config=config)
+
+        # # Magic
+        # wandb.watch(model, log_freq=50)
+
 
     def compute_loss(self, points_x, points_y):
      
@@ -83,7 +97,9 @@ class MosaicSDFOptimizer:
         return loss, l1_loss, l2_loss #, an_num_grad_loss
 
 
-    def train(self):
+    def step(self):
+        
+        epoch_time_start = time.time()
         self.model.train()
         # total_loss = 0
         d = 3
@@ -93,7 +109,10 @@ class MosaicSDFOptimizer:
                         rand_offset=self.points_random_spread,
                         random_seed=42)
         
-        for iteration in range(self.num_iterations):
+        n_steps = self.config['points_in_epoch'] // self.points_sample_size
+        eval_every_nth_step = self.config['eval_every_nth_points'] // self.points_sample_size
+        
+        for iteration in range(n_steps):
             
             if self.points_random_sampling:
                 points_x = (torch.rand((self.points_sample_size, d), 
@@ -119,21 +138,10 @@ class MosaicSDFOptimizer:
 
             loss.backward()
 
-            if (iteration + 1) % gradient_accumulation_steps == 0 or iteration == self.num_iterations - 1:
+            if (iteration + 1) % gradient_accumulation_steps == 0 or iteration == n_steps - 1:
                 self.optimizer.step()  # Update parameters
                 self.optimizer.zero_grad()  # Reset gradients
                 self.model.update_sdf_values(self.shape_sampler)
-            # else:
-            # loss.backward()
-
-            # self.optimizer.step()
-            # self.model.update_sdf_values(self.shape_sampler)
-                
-            
-
-            # loss = l1_loss  
-
-        
 
             stats = {
                 'step': iteration,
@@ -143,15 +151,19 @@ class MosaicSDFOptimizer:
                 # 'an_num_loss': an_num_grad_loss.item()
             }
             
-            if iteration % self.config.get('print_loss_iterations', 1) == 0:
-                
+            if (
+                (iteration + 1) % eval_every_nth_step == 0 
+                or iteration == n_steps - 1
+            ):
+            
                 self.model.eval()
 
                 val_losses = []
                 val_l1_losses = []
                 val_l2_losses = []
                 
-                for points in torch.split(test_points, self.config['points_eval_sample_size'] * 2):
+                for points in torch.split(test_points, 
+                                          self.points_sample_size * self.config['points_sample_size_eval_scaler'] * 2):
                     points_x = points[:points.shape[0] // 2]
                     points_y = points[points.shape[0] // 2:]
                     points_y.requires_grad=True
@@ -169,12 +181,16 @@ class MosaicSDFOptimizer:
                     'val_l2_loss': np.mean(val_l2_losses),
                 }
                 
-                print(f"Iteration {stats['step']}, val Loss: {stats['val_loss']:.4f}, "
+                sys.stdout.write(f"\nIteration {stats['step']}, val Loss: {stats['val_loss']:.4f}, "
                       f"val L1: {stats['val_l1_loss']:.4f}, val L2: {stats['val_l2_loss']:.4f} ||| "
                       f"train Loss: {stats['train_loss']:.4f} "
                       f"train L1: {stats['train_l1_loss']:.4f}, train L2: {stats['train_l2_loss']:.4f} "
                     #   f"An2Num Loss: {stats['an_num_loss']:.4f}"
                       )
+                sys.stdout.flush()
+                
+                if self.config['log_to_wandb'] and iteration != n_steps - 1:
+                    wandb.report(stats)
                 
                 self.model.train()
             
@@ -185,8 +201,12 @@ class MosaicSDFOptimizer:
                 graph.render(f'out/computation_graph_{iteration}', format='png')  # Saves the graph as 'computation_graph.png'
 
 
+        stats['epoch_time'] = time.time() - epoch_time_start
+        if self.config['log_to_wandb'] and iteration != n_steps - 1:
+            wandb.report(stats)
         # tune.report(loss=average_loss)  
-        # wandb.report(stats)  
+        
+        return stats
 
 
         
