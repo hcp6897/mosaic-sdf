@@ -9,6 +9,8 @@ __pycache__
 !**/*.py
 !**/*.ipynb
 !**/*.txt
+!**/*.md
+
 # !data/cube_wireframe.obj
 # !data/*
 !data/chain*

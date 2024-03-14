@@ -1,100 +1,64 @@
-from abc import abstractmethod
 import torch
 import torch.nn as nn
 import numpy as np
 
+from einops import rearrange
 
-from trimesh.caching import tracked_array
-from pysdf import SDF
-import point_cloud_utils as pcu
-from utils import to_tensor, to_numpy
 
-# TODO test point_mesh_distance from PT3D
-# TODO this class should be split into one that provides SDF and another that does operations on meshes
 class ShapeSampler(nn.Module):
-    def __init__(self, vertices, verts_idx, normalize_shape=True, 
-                 sdf_func=None, sdf_value_scaler=1):       
+    def __init__(self, shape_type):       
         super(ShapeSampler, self).__init__()
-            
-        self.vertices = vertices
-        self.verts_idx = verts_idx
 
-        if normalize_shape:
-            self.vertices, self.norm_center_offset, self.norm_max_extent = ShapeSampler.normalize_vertices(self.vertices)
-
-        self.np_vertices = to_numpy(self.vertices)
-        self.np_verts_idx = to_numpy(self.verts_idx)
-
-        self.sdf_func = sdf_func
-        self.sdf_value_scaler = sdf_value_scaler
+        self.shape_type = shape_type
         
-        if self.sdf_func is None:
-            tv = tracked_array(self.vertices.cpu().numpy())
-            tf = tracked_array(self.verts_idx.cpu().numpy())
-            self.sdf_value_scaler = -1
-            self.sdf_func = SDF(tv, tf)
+    def forward(self, points):
+        """
+        This is a stub function that simulates sampling the SDF for different shapes.
+        :param shape_type: A string indicating the type of shape ('sphere', 'cube', 'pyramid').
+        :param points: A tensor of points in space (N, 3) we want to sample the SDF for.
+        :return: A tensor representing the SDF values at the provided points.
+        """
+        if self.shape_type == "sphere":
+            return self.sample_sphere(points)
+        elif self.shape_type == "cube":
+            return self.sample_cube(points)
+        # elif shape_type == "pyramid":
+        #     return self.sample_pyramid(points)
+        else:
+            raise ValueError("Unknown shape type.")
         
+    def sample_sphere(self, points, radius=1.0):
+        """
+        Simulate SDF sampling for a sphere centered at the origin.
+        :param points: Points at which to sample the SDF (N, 3).
+        :param radius: Radius of the sphere.
+        :return: SDF values at the provided points.
+        """
+        return torch.norm(points, dim=1) - radius
 
-        self.noise_scale = 0 #noise_scale
-
-
-    def forward(self, points):   
-        # add check if points are not tensor, then bypassing numpy() conversion
-        np_points = to_numpy(points)
-        return torch.tensor(self.sdf_func(np_points) * self.sdf_value_scaler).to(points.device) 
-
-
-    def sample_n_random_points(self, n_points, rand_offset=None, random_seed=42):
-        
-        f_i, bc = pcu.sample_mesh_random(self.np_vertices, 
-                                         self.np_verts_idx, 
-                                         num_samples=n_points, 
-                                         random_seed=random_seed)
-
-        # Use the face indices and barycentric coordinate to compute sample positions and normals
-        v_sampled = pcu.interpolate_barycentric_coords(self.np_verts_idx, f_i, bc, self.np_vertices)
-        v_sampled = to_tensor(v_sampled, device=self.vertices.device)
-        
-        if rand_offset is not None:
-            v_sampled += (torch.rand_like(v_sampled) - .5) * rand_offset * 2
-        
-        return v_sampled
-
-
-    @abstractmethod
-    def from_file(file_path, device='cpu', make_watertight=True, wt_resolution=10_000, **kwargs):
-        vertices, verts_idx = pcu.load_mesh_vf(file_path)
-
-        if make_watertight:
-            vertices, verts_idx = pcu.make_mesh_watertight(vertices, verts_idx, resolution=wt_resolution)
-        return ShapeSampler(to_tensor(vertices, device), 
-                            to_tensor(verts_idx, device),
-                            **kwargs)
+    def sample_cube(self, points, side_length=2.0):
+        """
+        Simulate SDF sampling for a cube centered at the origin.
+        :param points: Points at which to sample the SDF (N, 3).
+        :param side_length: Side length of the cube.
+        :return: SDF values at the provided points.
+        """
+        half_side = side_length / 2
+        max_dist = torch.max(torch.abs(points) - half_side, dim=1)[0]
+        return max_dist
     
-    
-    @abstractmethod
-    def scale_offset_mesh(mesh, offset, scale):
-        scaled_verts = mesh.verts_list()[0] * scale
-        # Translate the mesh
-        translated_verts = scaled_verts + offset
-        # Create a new mesh with the transformed vertices and the same faces
-        new_mesh = mesh.clone()
-        new_mesh = new_mesh.update_padded(new_verts_padded=translated_verts.unsqueeze(0))
-        return new_mesh
-
-
-    @abstractmethod
-    def normalize_vertices(vertices, center_offset=None, max_extent=None):
-        # Further adjust to ensure the shape is centered at the origin
-        if center_offset is None:
-            center_offset = vertices.mean(dim=0)
-        vertices -= center_offset
-
-        # Calculate the scale factor as the max extent in any dimension
-        if max_extent is None:
-            max_extent = torch.abs(vertices).max()
-        # Normalize vertices to fit within the [-1, 1] range
-        normalized_vertices = vertices / max_extent
-        
-        return normalized_vertices, center_offset, max_extent
+    # def sample_pyramid(self, points, height=2.0, base=2.0):
+    #     """
+    #     Simulate SDF sampling for a pyramid centered at the origin.
+    #     :param points: Points at which to sample the SDF (N, 3).
+    #     :param height: Height of the pyramid.
+    #     :param base: Base length of the pyramid.
+    #     :return: SDF values at the provided points.
+    #     """
+    #     # This is a simplified stub for the pyramid SDF.
+    #     # A true SDF for a pyramid would involve more complex calculations.
+    #     x_dist = torch.abs(points[:, 0]) - base/2
+    #     y_dist = torch.abs(points[:, 1]) - base/2
+    #     z_dist = points[:, 2] - height/2
+    #     return torch.max(torch.max(x_dist, y_dist), z_dist)
 
