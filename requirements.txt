@@ -6,6 +6,8 @@ pysdf
 # mesh-to-sdf
 torchviz
 point-cloud-utils
+omegaconf
+
 wandb
 
 pytest

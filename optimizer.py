@@ -24,10 +24,6 @@ class MosaicSDFOptimizer(tune.Trainable):
         n_grids=config.get('n_grids', 1024)
 
         volume_centers = self.shape_sampler.sample_n_random_points(n_grids)
-        # volume_centers = torch.tensor(
-        #     self.shape_sampler.sample_n_random_points(n_grids),
-        #     device=self.device
-        # )
 
         self.model = MosaicSDF(
             grid_resolution=config['grid_resolution'],
@@ -46,7 +42,6 @@ class MosaicSDFOptimizer(tune.Trainable):
         self.lambda_val = config['lambda_val']
         self.val_size = config['val_size']
 
-        # self.criterion = nn.MSELoss()  # Example loss function; adjust as needed
         self.config = config
         self.points_sample_size = config['points_sample_size']
         self.points_random_sampling = config['points_random_sampling']
@@ -57,8 +52,6 @@ class MosaicSDFOptimizer(tune.Trainable):
         if config['log_to_wandb']:
             wandb.init(project=config['project_name'], config=config)
 
-        # # Magic
-        # wandb.watch(model, log_freq=50)
 
 
     def compute_loss(self, points_x, points_y):
@@ -79,16 +72,10 @@ class MosaicSDFOptimizer(tune.Trainable):
                                         grad_outputs=torch.ones_like(fx_xj_l2), 
                                         create_graph=True)[0]
         
+        # todo check other values
         grad_delta = 1e-2
 
-        # fx_yj_grad_num = self.compute_gradient_numerically(points_y, self.model.forward, delta=grad_delta)
-        # fx_yj_grad = fx_yj_grad_num
-        # an_num_grad_loss = torch.mean(torch.abs(fx_yj_grad_num - fx_yj_grad))
-        
-        # print(fx_yj_grad[:3])
-        # fs_yj_grad = self.shape_sampler.compute_sdf_gradient(points_y, delta=1e-4)
         fs_yj_grad = self.compute_gradient_numerically(points_y, self.shape_sampler.forward, delta=grad_delta)
-        # print(fs_yj_grad[:3])
 
         # L2 Loss - discrepancy in gradients
         l2_loss = torch.norm(fx_yj_grad - fs_yj_grad, p=2) / len(points_y)
@@ -103,7 +90,6 @@ class MosaicSDFOptimizer(tune.Trainable):
         
         epoch_time_start = time.time()
         self.model.train()
-        # total_loss = 0
         d = 3
         gradient_accumulation_steps = self.config['gradient_accumulation_steps']
 
@@ -159,13 +145,14 @@ class MosaicSDFOptimizer(tune.Trainable):
             ):
             
                 self.model.eval()
+                # with torch.no_grad():
 
                 val_losses = []
                 val_l1_losses = []
                 val_l2_losses = []
                 
                 for points in torch.split(test_points, 
-                                          self.points_sample_size * self.config['points_sample_size_eval_scaler'] * 2):
+                                        self.points_sample_size * self.config['points_sample_size_eval_scaler'] * 2):
                     points_x = points[:points.shape[0] // 2]
                     points_y = points[points.shape[0] // 2:]
                     points_y.requires_grad=True
@@ -175,7 +162,9 @@ class MosaicSDFOptimizer(tune.Trainable):
                     val_losses.append(loss.item())
                     val_l1_losses.append(l1_loss.item())
                     val_l2_losses.append(l2_loss.item())
-                
+
+                    self.optimizer.zero_grad()
+            
                 stats = {
                     **stats,
                     'val_loss': np.mean(val_losses),
@@ -195,6 +184,7 @@ class MosaicSDFOptimizer(tune.Trainable):
                 if self.config['log_to_wandb'] and iteration != n_steps - 1:
                     wandb.log(stats)
                 
+                
                 self.model.train()
             
             
@@ -207,7 +197,6 @@ class MosaicSDFOptimizer(tune.Trainable):
         stats['epoch_time'] = time.time() - epoch_time_start
         if self.config['log_to_wandb'] and iteration != n_steps - 1:
             wandb.log(stats)
-        # tune.report(loss=average_loss)  
         
         return stats
 

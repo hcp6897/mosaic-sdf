@@ -185,20 +185,29 @@ class MosaicSDFVisualizer:
                       vert_colors=[.25, .25, .25],
                       sdf_scaler=-1,
                       extra_sdf_offset=[0,0,0],
+                      region_span=[1,1,1],
                       batch_size=128):
         
+        # instead of sampling whole box, apply mask driven by region_span
+        grid_resolutions = np.int32(np.floor(np.ones(3) * resolution * np.array(region_span)))
+
+        def get_linspace(idx):
+            return torch.linspace(-1 * region_span[idx], 
+                                  1 * region_span[idx], 
+                                  grid_resolutions[idx])
         
-        # # Assuming 'mosaic_sdf' is your MosaicSDF instance and 'resolution' is the desired grid resolution
+
         grid_points = torch.stack(torch.meshgrid(
-            torch.linspace(-1, 1, resolution),
-            torch.linspace(-1, 1, resolution),
-            torch.linspace(-1, 1, resolution), indexing='ij'
+            get_linspace(0),
+            get_linspace(1),
+            get_linspace(2), 
+            indexing='ij'
         ), dim=-1).reshape(-1, 3)#.to(device)
-        
+
         sdf_values = process_in_batches(grid_points.to(device), sdf_func, batch_size)
         sdf_values *= sdf_scaler
         # print(sdf_values.shape)
-        sdf_volume = to_numpy(sdf_values.reshape(resolution, resolution, resolution))
+        sdf_volume = to_numpy(sdf_values.reshape(tuple(grid_resolutions)))
         # print(sdf_volume)
         # print(sdf_volume.shape)
         # print(sdf_volume < .5)

@@ -19,7 +19,8 @@ def compare_shapes(shape_sampler: ShapeSampler,
         if show_gt_sdf:
             plot_dict['gt_sdf_mesh'] = MosaicSDFVisualizer.rasterize_sdf(
                 sdf_func=shape_sampler.forward, resolution=resolution, sdf_scaler=-1, 
-                extra_sdf_offset=[2,0, 0], vert_colors=[0, .5, 0])
+                extra_sdf_offset=[2,0, 0], vert_colors=[0, .5, 0], 
+                **kwargs)
         if show_gt_mesh:
             plot_dict['gt_mesh'] = visualizer.create_state_meshes(
                 mosaic_sdf=mosaic_sdf,
@@ -29,7 +30,8 @@ def compare_shapes(shape_sampler: ShapeSampler,
                 resolution=resolution,
                 show_rasterized_sdf_mesh=False,
                 vert_colors=[0, 0, .5],
-                offset_vertices=torch.tensor([-2,0,0], device=device)
+                offset_vertices=torch.tensor([-2,0,0], device=device), 
+                **kwargs
                 )
         if show_mosaic_sdf:
             plot_dict['mosaic_meshes'] = visualizer.create_state_meshes(
@@ -38,7 +40,8 @@ def compare_shapes(shape_sampler: ShapeSampler,
                 show_target_mesh=False,
                 show_boundary_mesh=kwargs.get('show_boundary_mesh', False),
                 resolution=resolution,
-                vert_colors=[.5, .5, 0]
+                vert_colors=[.5, .5, 0], 
+                **kwargs
                 )
         
         # Render the plotly figure
