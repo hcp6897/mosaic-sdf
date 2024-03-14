@@ -1,3 +1,5 @@
+#!/bin/bash
+
 conda create -n gen3d python=3.10
 conda activate gen3d
 conda install pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia

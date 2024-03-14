@@ -14,7 +14,9 @@ __pycache__
 # !data/cube_wireframe.obj
 # !data/*
 !data/chain*
+!data/output.png
 
 *output/
 *wandb/
 *out/
+
