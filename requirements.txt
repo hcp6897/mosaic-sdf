@@ -7,6 +7,10 @@ pysdf
 torchviz
 point-cloud-utils
 omegaconf
+matplotlib
+scikit-image
+plotly
+nbformat
 
 wandb
 

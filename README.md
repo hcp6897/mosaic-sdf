@@ -21,8 +21,14 @@ Repository contains implementation of Mosaic-SDF shape representation algorhithm
 
 
 ## Getting Started
-### Prerequisites and Installation
-- check `setup.sh` and `requirements.txt` for list of prerequisites and modules required
+### Pre-requisites
+- Install [PyTorch 3D](https://github.com/facebookresearch/pytorch3d/tree/main)
+- Install `graphviz`, 
+```
+# On linux, run:
+sudo apt-get install graphviz
+```
+- then run `pip install -r requirements.txt` to install required packages
 
 
 ## Results
