@@ -15,12 +15,13 @@ def compare_shapes(shape_sampler: ShapeSampler,
 
     with torch.no_grad():
         plot_dict = {}
-         
+        
         if show_gt_sdf:
             plot_dict['gt_sdf_mesh'] = MosaicSDFVisualizer.rasterize_sdf(
                 sdf_func=shape_sampler.forward, resolution=resolution, sdf_scaler=-1, 
                 extra_sdf_offset=[2,0, 0], vert_colors=[0, .5, 0], 
                 **kwargs)
+
         if show_gt_mesh:
             plot_dict['gt_mesh'] = visualizer.create_state_meshes(
                 mosaic_sdf=mosaic_sdf,
@@ -33,6 +34,7 @@ def compare_shapes(shape_sampler: ShapeSampler,
                 offset_vertices=torch.tensor([-2,0,0], device=device), 
                 **kwargs
                 )
+            
         if show_mosaic_sdf:
             plot_dict['mosaic_meshes'] = visualizer.create_state_meshes(
                 mosaic_sdf=mosaic_sdf,

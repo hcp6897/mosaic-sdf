@@ -8,11 +8,12 @@ from utils import min_l2_distance
 from shape_sampler import ShapeSampler
 
 class MosaicSDF(nn.Module):
+
     def __init__(self, grid_resolution=7, n_grids=1024, 
                  volume_centers=None, volume_scales=None, mosaic_scale_multiplier=1,
-                 device='cuda'):
-      
+                 device='cuda'): 
         super(MosaicSDF, self).__init__()
+
         self.eps = 1e-4
         self.dtype = torch.float32
 
@@ -22,17 +23,14 @@ class MosaicSDF(nn.Module):
         self.n_grids = n_grids
         self.k = grid_resolution
 
-        
         if volume_centers is None:
             volume_centers = torch.rand((self.n_grids, 3), dtype=self.dtype) * 2 - 1
         # Assuming volume_centers, scales, and sdf_values are learnable parameters
         self.volume_centers = nn.Parameter(volume_centers.to(self.dtype))  
 
         if volume_scales is None:
-            
             mean_min_l2_dist = min_l2_distance(volume_centers.to(device)).mean()
-            volume_scales = torch.ones((n_grids,), device=device,
-                                   dtype=self.dtype) * mean_min_l2_dist
+            volume_scales = torch.ones((n_grids,), device=device, dtype=self.dtype) * mean_min_l2_dist
 
         self.scales = nn.Parameter(volume_scales.to(self.dtype) * mosaic_scale_multiplier)
 

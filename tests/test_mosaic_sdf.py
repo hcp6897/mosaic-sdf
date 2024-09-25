@@ -6,6 +6,7 @@ import numpy as np
 from mosaicSDF.mosaic_sdf import MosaicSDF
 
 class TestMosaicSDF(unittest.TestCase):
+    
     def setUp(self):
         # Example setup for a test case
         self.grid_resolution = 3

@@ -11,9 +11,7 @@ matplotlib
 scikit-image
 plotly
 nbformat
-
 wandb
-
 pytest
 
 # some requirements might be missing ))

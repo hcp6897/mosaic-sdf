@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+
 def to_numpy(var):
     if isinstance(var, torch.Tensor):
         # Ensure tensor is on CPU and convert to NumPy
@@ -20,7 +21,7 @@ def to_tensor(var, device):
 
 
 def process_in_batches(tensor, func, batch_size):
-    """
+    r"""
     Slices a tensor into batches, applies a function to each batch, and concatenates the results.
 
     Args:

@@ -12,6 +12,7 @@ from utils import to_tensor, to_numpy
 # TODO test point_mesh_distance from PT3D
 # TODO this class should be split into one that provides SDF and another that does operations on meshes
 class ShapeSampler(nn.Module):
+
     def __init__(self, vertices, verts_idx, normalize_shape=True, 
                  sdf_func=None, sdf_value_scaler=1):       
         super(ShapeSampler, self).__init__()
@@ -34,7 +35,6 @@ class ShapeSampler(nn.Module):
             self.sdf_value_scaler = -1
             self.sdf_func = SDF(tv, tf)
         
-
         self.noise_scale = 0 #noise_scale
 
 
