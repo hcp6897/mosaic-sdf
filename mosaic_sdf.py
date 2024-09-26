@@ -34,13 +34,12 @@ class MosaicSDF(nn.Module):
 
         self.scales = nn.Parameter(volume_scales.to(self.dtype) * mosaic_scale_multiplier)
 
-        init_mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution,
-                                             dtype=self.dtype)
+        init_mosaic_sdf_values = torch.randn(n_grids, grid_resolution, grid_resolution, grid_resolution, dtype=self.dtype)
         self.register_buffer('mosaic_sdf_values', init_mosaic_sdf_values)
 
 
     def forward(self, points):
-        """
+        r"""
         Compute the SDF values at given points using the Mosaic-SDF representation.
         
         :param points: Tensor of points where SDF values are to be computed (N, 3).
@@ -52,15 +51,57 @@ class MosaicSDF(nn.Module):
         return points_sdf
 
 
-    def _compute_trilinear_interpolation_weights(self, point_relative_positions):
+    def _compute_point_sdf(self, points):
+        r"""
+        Calculate the sdf of points. 
+
+        :param points: 3D locations.
+        """
+        # covert points to volume grids
+        points_expanded_to_grids = points[:, None, :]
+        points_expanded_to_grids = points_expanded_to_grids#.detach()
+
+        grids_expanded_to_points = self.volume_centers[None, ...]
+        scales_expanded_to_points = self.scales[None, ..., None]
+
+        grid_relative_pos_to_point = (points_expanded_to_grids - grids_expanded_to_points) / scales_expanded_to_points
+        interpolation_weights = self._compute_trilinear_interpolation_weights(grid_relative_pos_to_point)
         
+        interpolation_values = self.mosaic_sdf_values[None, ...] * interpolation_weights
+        interpolation_values = interpolation_values.sum(axis=(2,3,4))
+
+        # calculate each grid weight
+        grid_normalized_relative_dist = torch.linalg.norm(grid_relative_pos_to_point, dim=-1, ord=2)
+        
+        # w_i_hat
+        grid_weight = torch.relu(1 - grid_normalized_relative_dist + self.eps)
+        
+        sum_of_weights = grid_weight.sum(axis=-1, keepdim=True)
+        
+        normalized_grid_weight = torch.where(
+            sum_of_weights > self.eps, 
+            grid_weight / sum_of_weights, 
+            torch.zeros_like(grid_weight))
+
+        uncovered_mask = sum_of_weights < self.eps
+
+        point_sdf = torch.where(
+            uncovered_mask.view(-1),
+            torch.full(points.shape[:1], self.out_of_reach_const, device=points.device),
+            torch.sum(interpolation_values * normalized_grid_weight, axis=-1)
+        )
+
+        return point_sdf
+    
+
+    def _compute_trilinear_interpolation_weights(self, point_relative_positions):
+        """
+        Calculate the trinlinear interpolation.
+        """
         # Step 1: Create a tensor with each cell's value being its relative position within the tensor
-        coord_span = torch.linspace(-1, 1, steps=self.k, device=point_relative_positions.device, 
-                                    dtype=self.dtype)
+        coord_span = torch.linspace(-1, 1, steps=self.k, device=point_relative_positions.device, dtype=self.dtype)
         coord_step = 2 / (self.k - 1)
-        grid_coords = torch.stack(
-            torch.meshgrid(coord_span, coord_span, coord_span, indexing='ij'), 
-            dim=-1)
+        grid_coords = torch.stack(torch.meshgrid(coord_span, coord_span, coord_span, indexing='ij'), dim=-1)
 
         # Step 2: Expand dims for broadcasting
         grid_coords_expanded = grid_coords[None, None, ...]  # Shape: (1, 1, K, K, K, 3)
@@ -84,55 +125,23 @@ class MosaicSDF(nn.Module):
         # # set zeros where have nan because divided by zero
         in_grid_weights_normalized = torch.where(
             in_grid_weights_sum > self.eps, 
-            in_grid_weights / in_grid_weights_sum, torch.zeros_like(in_grid_weights))
-        
+            in_grid_weights / in_grid_weights_sum,
+            torch.zeros_like(in_grid_weights))
         
         return in_grid_weights_normalized
 
 
-    def _compute_point_sdf(self, points):
-        
-        points_expanded_to_grids = points[:, None, :]
-        points_expanded_to_grids = points_expanded_to_grids#.detach()
-        grids_expanded_to_points = self.volume_centers[None, ...]
-        scales_expanded_to_points = self.scales[None, ..., None]
-
-        grid_relative_pos_to_point = (points_expanded_to_grids - grids_expanded_to_points) / scales_expanded_to_points
-        interpolation_weights = self._compute_trilinear_interpolation_weights(grid_relative_pos_to_point)
-        
-        interpolation_values = self.mosaic_sdf_values[None, ...] * interpolation_weights
-        interpolation_values = interpolation_values.sum(axis=(2,3,4))
-
-        # Calculate each grid weight
-        grid_normalized_relative_dist = torch.linalg.norm(grid_relative_pos_to_point, dim=-1, ord=2)
-        
-        # w_i_hat
-        grid_weight = torch.relu(1 - grid_normalized_relative_dist + self.eps)
-        
-        sum_of_weights = grid_weight.sum(axis=-1, keepdim=True)
-        
-        normalized_grid_weight = torch.where(
-            sum_of_weights > self.eps, 
-            grid_weight / sum_of_weights, torch.zeros_like(grid_weight))
-
-        uncovered_mask = sum_of_weights < self.eps
-
-        point_sdf = torch.where(
-            uncovered_mask.view(-1),
-            torch.full(points.shape[:1], self.out_of_reach_const, device=points.device),
-            torch.sum(interpolation_values * normalized_grid_weight, axis=-1)
-        )
-
-        return point_sdf
-    
-
-    # Update SDF values
     def update_sdf_values(self, shape_sampler: ShapeSampler):
+        r""" 
+        Update SDF values.
+        """
         self.mosaic_sdf_values = self._compute_local_sdf(shape_sampler)
 
     
     def _compute_local_sdf(self, shape_sampler: ShapeSampler):
-                
+        """
+        Calculate the sdf of local samples.
+        """
         in_grid_offsets = torch.linspace(-1, 1, self.k)
 
         x, y, z = torch.meshgrid(in_grid_offsets, in_grid_offsets, in_grid_offsets, indexing='ij')

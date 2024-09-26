@@ -13,8 +13,8 @@ import wandb
 from pathlib import Path
 
 class MosaicSDFOptimizer(tune.Trainable):
+    
     def setup(self, config):
-        
         # choosing right seed value is crucial )))
         torch.manual_seed(42) 
 
@@ -55,7 +55,6 @@ class MosaicSDFOptimizer(tune.Trainable):
 
 
     def compute_loss(self, points_x, points_y):
-     
         # Compute SDF values for the points using the Mosaic-SDF representation
         fx_xj = self.model.forward(points_x)
         fs_xj = self.shape_sampler.forward(points_x).to(self.device)
@@ -87,7 +86,6 @@ class MosaicSDFOptimizer(tune.Trainable):
 
 
     def step(self):
-        
         epoch_time_start = time.time()
         self.model.train()
         d = 3
@@ -201,9 +199,6 @@ class MosaicSDFOptimizer(tune.Trainable):
         return stats
 
 
-        
-        
-
     def save_checkpoint(self, checkpoint_dir):
         # dir_path = os.path.join(checkpoint_dir, self.config['project_name'])
         dir_path = checkpoint_dir
@@ -217,7 +212,6 @@ class MosaicSDFOptimizer(tune.Trainable):
 
     def load_checkpoint(self, checkpoint_path):
         self.model.load_state_dict(torch.load(checkpoint_path))
-
 
 
     def compute_gradient_numerically(self, points, forward_func, delta=1e-4):

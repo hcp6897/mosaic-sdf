@@ -12,14 +12,12 @@ import os
 
 cube_mesh_path = 'data/cube.obj'
 cube_wireframe_path = 'data/cube_wireframe.obj'
-
 sdf_shape_path = 'data/chain.obj'
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 ## Config
-
 config = {   
     'device': device,
     # 'shape_sampler': shape_sampler,  # Adjust accordingly
@@ -74,10 +72,8 @@ config = {
 }
 
 
-
 # from ray.air.integrations.mlflow import MLflowLoggerCallback
 # mlflow_tracking_uri = "http://localhost:5000"
-
 driver_ctx = DataContext.get_current()
 trainable_with_resources = tune.with_resources(MosaicSDFOptimizer, {"cpu": 10, "gpu": 1})
 

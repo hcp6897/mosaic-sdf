@@ -3,18 +3,17 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-
 from trimesh.caching import tracked_array
 from pysdf import SDF
 import point_cloud_utils as pcu
 from utils import to_tensor, to_numpy
 
+
 # TODO test point_mesh_distance from PT3D
 # TODO this class should be split into one that provides SDF and another that does operations on meshes
 class ShapeSampler(nn.Module):
 
-    def __init__(self, vertices, verts_idx, normalize_shape=True, 
-                 sdf_func=None, sdf_value_scaler=1):       
+    def __init__(self, vertices, verts_idx, normalize_shape=True, sdf_func=None, sdf_value_scaler=1):       
         super(ShapeSampler, self).__init__()
             
         self.vertices = vertices
@@ -35,21 +34,26 @@ class ShapeSampler(nn.Module):
             self.sdf_value_scaler = -1
             self.sdf_func = SDF(tv, tf)
         
-        self.noise_scale = 0 #noise_scale
+        self.noise_scale = 0    # noise_scale
 
 
     def forward(self, points):   
         # add check if points are not tensor, then bypassing numpy() conversion
         np_points = to_numpy(points)
+
         return torch.tensor(self.sdf_func(np_points) * self.sdf_value_scaler).to(points.device) 
 
 
     def sample_n_random_points(self, n_points, rand_offset=None, random_seed=42):
-        
-        f_i, bc = pcu.sample_mesh_random(self.np_vertices, 
-                                         self.np_verts_idx, 
-                                         num_samples=n_points, 
-                                         random_seed=random_seed)
+        """
+        Random sample points.
+        """
+        f_i, bc = pcu.sample_mesh_random(
+            self.np_vertices, 
+            self.np_verts_idx, 
+            num_samples=n_points, 
+            random_seed=random_seed
+        )
 
         # Use the face indices and barycentric coordinate to compute sample positions and normals
         v_sampled = pcu.interpolate_barycentric_coords(self.np_verts_idx, f_i, bc, self.np_vertices)
